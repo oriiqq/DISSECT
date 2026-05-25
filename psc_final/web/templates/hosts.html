@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    Host-Centric View
+    {% if hosts %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {{ hosts|length }} host{{ 's' if hosts|length != 1 else '' }} analysed
+      {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+</header>
+
+<div class="content">
+{% if not hosts %}
+<div class="empty-state">
+  <svg style="width:40px;height:40px;fill:none;stroke:var(--border);stroke-width:1.5;margin:0 auto .75rem;display:block;" viewBox="0 0 24 24">
+    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+    <line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+  </svg>
+  <p>No sessions loaded.</p>
+  <p style="margin-top:.25rem;font-size:12px;">Upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> to see the host-centric view.</p>
+</div>
+
+{% else %}
+
+<div style="display:grid;gap:10px;">
+{% for host in hosts %}
+{% set tier_color = 'var(--red)' if host.max_tier == 'P1_INCIDENT'
+                    else 'var(--amber)' if host.max_tier == 'P2_ALERT'
+                    else 'var(--teal)' if host.max_tier == 'P3_WARNING'
+                    else 'var(--border)' %}
+{% set tier_bg = 'var(--red-bg)' if host.max_tier == 'P1_INCIDENT'
+                 else 'var(--amber-bg)' if host.max_tier == 'P2_ALERT'
+                 else 'var(--teal-bg)' if host.max_tier == 'P3_WARNING'
+                 else 'var(--bg2)' %}
+
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;border-left:3px solid {{ tier_color }};">
+  <!-- Host header -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:.65rem;cursor:pointer;"
+       onclick="toggleEl('host-sessions-{{ loop.index }}')">
+    <span class="badge {{ tier_cls(host.max_tier) }}" style="flex-shrink:0;">
+      {{ host.max_tier.split('_')[0] }}
+    </span>
+    <code class="mono" style="font-size:14px;font-weight:700;color:var(--text);">{{ host.host_id }}</code>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+      {% if host.p1_count > 0 %}
+      <span style="background:var(--red-bg);color:var(--red-text);font-size:10px;padding:1px 7px;border-radius:99px;font-weight:700;">{{ host.p1_count }} P1</span>
+      {% endif %}
+      {% if host.p2_count > 0 %}
+      <span style="background:var(--amber-bg);color:var(--amber-text);font-size:10px;padding:1px 7px;border-radius:99px;font-weight:700;">{{ host.p2_count }} P2</span>
+      {% endif %}
+      {% if host.p3_count > 0 %}
+      <span style="background:var(--teal-bg);color:var(--teal-text);font-size:10px;padding:1px 7px;border-radius:99px;font-weight:700;">{{ host.p3_count }} P3</span>
+      {% endif %}
+      <span style="font-size:11px;color:var(--text3);">{{ host.session_count }} session{{ 's' if host.session_count != 1 else '' }}</span>
+      <span style="font-size:11px;color:var(--text3);">·</span>
+      <span style="font-size:11px;color:var(--text3);">{{ host.technique_count }} TTP{{ 's' if host.technique_count != 1 else '' }}</span>
+      {% if host.ioc_count > 0 %}
+      <span style="font-size:11px;color:var(--text3);">·</span>
+      <span style="font-size:11px;color:var(--text3);">{{ host.ioc_count }} IOC{{ 's' if host.ioc_count != 1 else '' }}</span>
+      {% endif %}
+      <span style="color:var(--border);font-size:14px;">›</span>
+    </div>
+  </div>
+
+  <!-- Timing and max score -->
+  <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:.6rem;font-size:11px;color:var(--text3);">
+    {% if host.first_seen %}
+    <span>First seen: <strong style="color:var(--text2);">{{ host.first_seen.strftime('%Y-%m-%d %H:%M') }}</strong></span>
+    {% endif %}
+    {% if host.last_seen %}
+    <span>Last seen: <strong style="color:var(--text2);">{{ host.last_seen.strftime('%Y-%m-%d %H:%M') }}</strong></span>
+    {% endif %}
+    <span>Max score: <strong style="color:{% if host.max_score >= 80 %}var(--red){% elif host.max_score >= 60 %}var(--amber){% else %}var(--teal){% endif %}">{{ host.max_score | round | int }}/100</strong></span>
+  </div>
+
+  <!-- Infection spread timeline strip -->
+  {% if host.timeline_events %}
+  <div style="margin-bottom:.6rem;">
+    <div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:4px;">Infection Timeline</div>
+    <div style="position:relative;height:18px;background:var(--bg2);border-radius:99px;overflow:visible;">
+      <div style="position:absolute;top:50%;left:8px;right:8px;height:1px;background:var(--border);transform:translateY(-50%);pointer-events:none;"></div>
+      {% for ev in host.timeline_events %}
+      <div style="position:absolute;left:calc({{ ev.pct }}% - 5px);top:50%;transform:translateY(-50%);
+                  width:10px;height:10px;border-radius:50%;z-index:2;
+                  border:1.5px solid var(--card);cursor:default;
+                  background:{% if ev.tier == 'P1_INCIDENT' %}var(--red){% elif ev.tier == 'P2_ALERT' %}var(--amber){% elif ev.tier == 'P3_WARNING' %}var(--teal){% else %}var(--border){% endif %};"
+           title="{{ ev.tier.split('_')[0] }} · score {{ ev.score }} · {{ ev.ts }}"></div>
+      {% endfor %}
+    </div>
+    {% if host.first_seen and host.last_seen and host.first_seen != host.last_seen %}
+    <div style="display:flex;justify-content:space-between;margin-top:2px;font-size:9px;color:var(--text3);font-family:var(--mono);">
+      <span>{{ host.first_seen.strftime('%m/%d %H:%M') }}</span>
+      <span>{{ host.last_seen.strftime('%m/%d %H:%M') }}</span>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Technique tags -->
+  {% if host.techniques %}
+  <div style="margin-bottom:.5rem;">
+    {% for t in host.techniques[:12] %}
+    <span class="tech-tag" style="font-size:9.5px;padding:1px 6px;">{{ t }}</span>
+    {% endfor %}
+    {% if host.techniques|length > 12 %}
+    <span style="font-size:10.5px;color:var(--text3);">+ {{ host.techniques|length - 12 }} more</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Defense gap indicator -->
+  {% if host.sigma_gaps %}
+  <div style="display:flex;align-items:flex-start;gap:6px;background:var(--amber-bg);border:0.5px solid var(--amber);
+              border-radius:var(--radius);padding:.4rem .7rem;margin-bottom:.4rem;">
+    <svg style="width:12px;height:12px;flex-shrink:0;margin-top:1px;fill:none;stroke:var(--amber);stroke-width:2;" viewBox="0 0 24 24">
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+    <div>
+      <div style="font-size:9.5px;font-weight:700;color:var(--amber-text);margin-bottom:2px;">No dedicated Sigma rule:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:3px;">
+        {% for t in host.sigma_gaps %}
+        <span style="background:var(--amber);color:var(--card);font-family:var(--mono);font-size:9px;
+                     padding:1px 5px;border-radius:3px;font-weight:600;">{{ t }}</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Expandable session list -->
+  <div id="host-sessions-{{ loop.index }}" style="display:none;margin-top:.65rem;border-top:0.5px solid var(--border);padding-top:.65rem;">
+    <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:.4rem;">
+      Sessions on {{ host.host_id }}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);">
+          <th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">TIER</th>
+          <th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">SCORE</th>
+          <th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">PID</th>
+          <th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">TECHNIQUES</th>
+          <th style="padding:4px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">TIME</th>
+          <th style="padding:4px 8px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in host.sessions %}
+        <tr style="border-bottom:0.5px solid var(--border2);">
+          <td style="padding:5px 8px;vertical-align:middle;">
+            <span class="badge {{ tier_cls(s.alert_tier) }}" style="font-size:9px;">{{ s.alert_tier.split('_')[0] }}</span>
+          </td>
+          <td style="padding:5px 8px;vertical-align:middle;font-weight:600;font-family:var(--mono);
+                     color:{% if s.weighted_score >= 80 %}var(--red){% elif s.weighted_score >= 60 %}var(--amber){% else %}var(--teal){% endif %}">
+            {{ s.weighted_score | round | int }}
+          </td>
+          <td style="padding:5px 8px;vertical-align:middle;font-family:var(--mono);">{{ s.process_id }}</td>
+          <td style="padding:5px 8px;vertical-align:middle;">
+            {% set techs = s.technique_set | sort | list %}
+            {% for t in techs[:3] %}<span class="tech-tag" style="font-size:9px;padding:1px 5px;">{{ t }}</span>{% endfor %}
+            {% if techs|length > 3 %}<span style="font-size:10px;color:var(--text3);">+{{ techs|length - 3 }}</span>{% endif %}
+          </td>
+          <td style="padding:5px 8px;vertical-align:middle;font-size:10.5px;color:var(--text3);font-family:var(--mono);">
+            {{ s.start_time.strftime('%Y-%m-%d %H:%M') if s.start_time else '—' }}
+          </td>
+          <td style="padding:5px 8px;vertical-align:middle;">
+            <a href="/?session={{ s.session_id }}" class="btn btn-sm" style="font-size:9px;"
+               hx-get="/sessions/{{ s.session_id }}"
+               hx-target="#detail-panel"
+               hx-swap="innerHTML"
+               hx-push-url="/"
+               onclick="history.pushState(null,'','/');document.querySelectorAll('.session-row').forEach(r=>r.classList.remove('selected'));var row=document.getElementById('row-{{ s.session_id }}');if(row){row.classList.add('selected');row.scrollIntoView({block:'nearest'});}">
+              View ↗
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /card -->
+{% endfor %}
+</div>
+
+{% endif %}
+</div><!-- /content -->
+
+<script>
+function toggleEl(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = (el.style.display === 'none') ? '' : 'none';
+}
+</script>
+{% endblock %}

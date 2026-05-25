@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    C2 Beacon Clusters
+    {% if beacon_count %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {{ beacon_count }} beaconing session{{ 's' if beacon_count != 1 else '' }} detected
+      {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+</header>
+
+<div class="content">
+{% if not beaconing %}
+<div class="empty-state">
+  <svg style="width:40px;height:40px;fill:none;stroke:var(--border);stroke-width:1.5;margin:0 auto .75rem;display:block;" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="2"/>
+    <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M20.07 4.93a10 10 0 0 1 0 14.14M3.93 19.07a10 10 0 0 1 0-14.14"/>
+  </svg>
+  <p>No C2 beacon patterns detected.</p>
+  <p style="margin-top:.25rem;font-size:12px;">
+    Beacon detection requires 6+ script blocks from the same session with regular inter-block timing.
+    Upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a>.
+  </p>
+</div>
+
+{% else %}
+
+<!-- Summary cards -->
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:1.25rem;">
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--amber);">{{ beacon_count }}</div>
+    <div class="stat-label">Beaconing Sessions</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ framework_groups | length }}</div>
+    <div class="stat-label">Frameworks Detected</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ beaconing | map(attribute='host_id') | unique | list | length }}</div>
+    <div class="stat-label">Unique Hosts</div>
+  </div>
+  {% set all_c2_iocs = [] %}
+  {% for s in beaconing %}{% for ioc in s.iocs %}{% if '.' in ioc and not ioc.startswith('C:\\') %}{% if all_c2_iocs.append(ioc) %}{% endif %}{% endif %}{% endfor %}{% endfor %}
+  <div class="stat-card">
+    <div class="stat-value">{{ all_c2_iocs | unique | list | length }}</div>
+    <div class="stat-label">Unique C2 IOCs</div>
+  </div>
+</div>
+
+<!-- C2 Map Widget -->
+{% if c2_geo_points %}
+<div style="margin-bottom:1.25rem;">
+  <div class="section-header">
+    <span class="section-title">C2 Infrastructure Map</span>
+    <span style="font-size:11px;color:var(--text3);">
+      {{ c2_geo_points|length }} IP{{ 's' if c2_geo_points|length != 1 else '' }} geolocated
+      &nbsp;·&nbsp; <span style="opacity:.6;">ip-api.com</span>
+    </span>
+  </div>
+  <div style="border:0.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">
+    <div style="background:#03030a;padding:1rem;display:flex;justify-content:center;">
+      <!-- Wrapper: canvas + overlay markers share this as the positioning context -->
+      <div style="position:relative;width:100%;max-width:700px;line-height:0;">
+        <canvas id="c2-map" width="700" height="360"
+                style="display:block;width:100%;height:auto;border-radius:4px;"></canvas>
+        <!-- Pulsing ring overlays, positioned by JS using percentages -->
+        <div id="c2-map-markers" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;"></div>
+        <!-- Loading overlay — sits on top while the map renders -->
+        <div id="c2-map-loading" style="position:absolute;inset:0;z-index:10;display:flex;flex-direction:column;
+                align-items:center;justify-content:center;background:#03030a;pointer-events:none;transition:opacity .5s;">
+          <div style="width:28px;height:28px;border:2px solid #111;border-top-color:#ff3b3b;
+                      border-radius:50%;animation:spin .8s linear infinite;"></div>
+          <div style="color:#444;font-size:11px;margin-top:.6rem;">Loading map…</div>
+        </div>
+      </div>
+    </div>
+    <!-- IP legend -->
+    <div style="background:var(--card);border-top:0.5px solid var(--border);padding:.625rem 1rem;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+      <span style="font-size:9.5px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;flex-shrink:0;margin-right:4px;">C2 IPs</span>
+      {% for pt in c2_geo_points %}
+      <span style="display:inline-flex;align-items:center;gap:5px;background:var(--red-bg);color:var(--red-text);
+                   font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:4px;border:0.5px solid var(--red);cursor:pointer;"
+            onclick="copyText({{ pt.ip | tojson }}, 'C2 IP')" title="Click to copy">
+        <span style="width:6px;height:6px;border-radius:50%;background:var(--red);flex-shrink:0;display:inline-block;"></span>
+        {{ pt.ip }}
+        {% if pt.city or pt.country %}
+        <span style="opacity:.65;font-size:9.5px;">{{ pt.city }}{% if pt.city and pt.country %}, {% endif %}{{ pt.country }}</span>
+        {% endif %}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Beacon Period Comparison -->
+{% if period_clusters %}
+<div style="margin-bottom:1.25rem;">
+  <div class="section-header">
+    <span class="section-title">Beacon Period Comparison</span>
+    <span style="font-size:11px;color:var(--text3);">{{ period_clusters|length }} cluster{{ 's' if period_clusters|length != 1 else '' }} with matching callback intervals — possible shared C2 operator</span>
+  </div>
+  {% for cluster in period_clusters %}
+  <div style="background:var(--card);border:0.5px solid var(--amber);border-radius:var(--radius-lg);padding:1rem;margin-bottom:.625rem;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:.6rem;">
+      <span style="font-size:11px;font-weight:700;color:var(--amber-text);font-family:var(--mono);">~{{ cluster.period }}s</span>
+      <span style="background:var(--amber-bg);color:var(--amber-text);font-size:10px;padding:1px 8px;border-radius:99px;font-weight:700;">
+        {{ cluster.sessions|length }} session{{ 's' if cluster.sessions|length != 1 else '' }} matched
+      </span>
+      <span style="font-size:10px;color:var(--text3);">
+        {{ cluster.sessions | map(attribute='host_id') | unique | list | length }} unique host{{ 's' if (cluster.sessions | map(attribute='host_id') | unique | list | length) != 1 else '' }}
+      </span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);">
+          <th style="padding:4px 8px;text-align:left;font-size:9.5px;color:var(--text3);font-weight:600;">HOST</th>
+          <th style="padding:4px 8px;text-align:left;font-size:9.5px;color:var(--text3);font-weight:600;">PID</th>
+          <th style="padding:4px 8px;text-align:left;font-size:9.5px;color:var(--text3);font-weight:600;">PERIOD</th>
+          <th style="padding:4px 8px;text-align:left;font-size:9.5px;color:var(--text3);font-weight:600;">JITTER</th>
+          <th style="padding:4px 8px;text-align:left;font-size:9.5px;color:var(--text3);font-weight:600;">CONF</th>
+          <th style="padding:4px 8px;text-align:left;font-size:9.5px;color:var(--text3);font-weight:600;">FRAMEWORK</th>
+          <th style="padding:4px 8px;text-align:left;font-size:9.5px;color:var(--text3);font-weight:600;">C2 IOCs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in cluster.sessions %}
+        {% set bp = s.beacon_profile %}
+        <tr style="border-bottom:0.5px solid var(--border2);">
+          <td style="padding:4px 8px;font-family:var(--mono);font-size:10.5px;">{{ s.host_id }}</td>
+          <td style="padding:4px 8px;font-family:var(--mono);">{{ s.process_id }}</td>
+          <td style="padding:4px 8px;font-family:var(--mono);font-weight:700;color:var(--amber-text);">{{ bp.period_seconds }}s</td>
+          <td style="padding:4px 8px;font-family:var(--mono);">{{ (bp.jitter_pct * 100) | round(1) }}%</td>
+          <td style="padding:4px 8px;font-family:var(--mono);">{{ (bp.confidence * 100) | round | int }}%</td>
+          <td style="padding:4px 8px;color:var(--text2);">{{ bp.framework_hint or '—' }}</td>
+          <td style="padding:4px 8px;max-width:160px;">
+            {% for ioc in s.iocs[:2] %}
+            <span class="ioc-chip" style="font-size:9px;" onclick="copyText({{ ioc | tojson }}, 'IOC')" title="{{ ioc }}">
+              {{ ioc[:28] }}{% if ioc|length > 28 %}…{% endif %}
+            </span>
+            {% endfor %}
+            {% if s.iocs|length > 2 %}<span style="font-size:9.5px;color:var(--text3);">+{{ s.iocs|length - 2 }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Framework groups -->
+{% for fw_name, fw_sessions in framework_groups.items() %}
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:.875rem;border-left:3px solid var(--amber);">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:.75rem;">
+    <svg style="width:16px;height:16px;fill:none;stroke:var(--amber);stroke-width:2;flex-shrink:0;" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="2"/>
+      <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49"/>
+    </svg>
+    <span style="font-size:14px;font-weight:700;color:var(--amber-text);">
+      {{ fw_name.replace('_', ' ').title() if fw_name != 'unknown' else 'Unknown Framework' }}
+    </span>
+    <span style="background:var(--amber-bg);color:var(--amber-text);font-size:10px;padding:1px 8px;border-radius:99px;font-weight:700;">
+      {{ fw_sessions|length }} session{{ 's' if fw_sessions|length != 1 else '' }}
+    </span>
+  </div>
+
+  <table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border);">
+        <th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">HOST</th>
+        <th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">PID</th>
+        <th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">PERIOD</th>
+        <th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">JITTER</th>
+        <th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">CONF</th>
+        <th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">SAMPLES</th>
+        <th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">SCORE</th>
+        <th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text3);font-weight:600;">C2 IOCs</th>
+        <th style="padding:5px 8px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in fw_sessions %}
+      {% set bp = s.beacon_profile %}
+      <tr style="border-bottom:0.5px solid var(--border2);">
+        <td style="padding:5px 8px;vertical-align:middle;"><code class="mono" style="font-size:11px;">{{ s.host_id }}</code></td>
+        <td style="padding:5px 8px;vertical-align:middle;font-family:var(--mono);">{{ s.process_id }}</td>
+        <td style="padding:5px 8px;vertical-align:middle;font-family:var(--mono);font-weight:600;color:var(--amber-text);">{{ bp.period_seconds }}s</td>
+        <td style="padding:5px 8px;vertical-align:middle;font-family:var(--mono);">{{ (bp.jitter_pct * 100) | round(1) }}%</td>
+        <td style="padding:5px 8px;vertical-align:middle;">
+          <div style="display:flex;align-items:center;gap:5px;">
+            <div style="width:40px;height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+              <div style="width:{{ (bp.confidence * 100) | round | int }}%;height:100%;background:{% if bp.confidence >= 0.85 %}var(--red){% elif bp.confidence >= 0.7 %}var(--amber){% else %}var(--teal){% endif %};"></div>
+            </div>
+            <span style="font-size:10.5px;font-family:var(--mono);">{{ (bp.confidence * 100) | round | int }}%</span>
+          </div>
+        </td>
+        <td style="padding:5px 8px;vertical-align:middle;font-family:var(--mono);">{{ bp.sample_count }}</td>
+        <td style="padding:5px 8px;vertical-align:middle;font-family:var(--mono);font-weight:600;
+                   color:{% if s.weighted_score >= 80 %}var(--red){% elif s.weighted_score >= 60 %}var(--amber){% else %}var(--teal){% endif %}">
+          {{ s.weighted_score | round | int }}
+        </td>
+        <td style="padding:5px 8px;vertical-align:middle;max-width:180px;">
+          {% for ioc in s.iocs[:3] %}
+          <span class="ioc-chip" style="font-size:9px;" title="{{ ioc }}" onclick="copyText({{ ioc | tojson }}, 'IOC')">
+            {{ ioc[:30] }}{% if ioc|length > 30 %}…{% endif %}
+          </span>
+          {% endfor %}
+          {% if s.iocs|length > 3 %}<span style="font-size:10px;color:var(--text3);">+{{ s.iocs|length - 3 }}</span>{% endif %}
+        </td>
+        <td style="padding:5px 8px;vertical-align:middle;">
+          <button class="btn btn-sm" style="font-size:9px;"
+                  hx-get="/sessions/{{ s.session_id }}"
+                  hx-target="#v1-beacon-detail"
+                  hx-swap="innerHTML"
+                  onclick="document.getElementById('v1-beacon-detail').scrollIntoView({behavior:'smooth'});">
+            View ↗
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+
+<!-- Shared C2 Infrastructure Clusters -->
+{% if infra_clusters %}
+<div style="margin-bottom:1.25rem;">
+  <div class="section-header">
+    <span class="section-title">Shared C2 Infrastructure</span>
+    <span style="font-size:11px;color:var(--text3);">{{ infra_clusters|length }} cluster{{ 's' if infra_clusters|length != 1 else '' }} — multiple implants contacting the same infrastructure</span>
+  </div>
+  {% for c in infra_clusters %}
+  <div style="background:var(--card);border:0.5px solid var(--red);border-radius:var(--radius-lg);padding:1rem;margin-bottom:.625rem;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:.6rem;flex-wrap:wrap;">
+      <span style="background:var(--red-bg);color:var(--red-text);font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;">{{ c.cluster_type }}</span>
+      <code class="mono" style="font-size:12px;font-weight:700;color:var(--red-text);">{{ c.key }}</code>
+      <span style="font-size:10px;color:var(--text3);margin-left:auto;">
+        {{ c.sessions|length }} session{{ 's' if c.sessions|length != 1 else '' }} &nbsp;·&nbsp;
+        {{ c.sessions | map(attribute='host_id') | unique | list | length }} host{{ 's' if (c.sessions | map(attribute='host_id') | unique | list | length) != 1 else '' }}
+      </span>
+    </div>
+    <!-- IOCs in this cluster -->
+    <div style="margin-bottom:.5rem;display:flex;flex-wrap:wrap;gap:4px;">
+      {% for ioc in c.iocs %}
+      <span class="ioc-chip" style="font-size:9.5px;" onclick="copyText({{ ioc | tojson }}, 'IOC')" title="{{ ioc }}">
+        {{ ioc[:40] }}{% if ioc|length > 40 %}…{% endif %}
+      </span>
+      {% endfor %}
+    </div>
+    <!-- Affected sessions -->
+    <div style="display:flex;flex-wrap:wrap;gap:4px;">
+      {% for s in c.sessions %}
+      <button class="btn btn-sm" style="font-size:9px;"
+              hx-get="/sessions/{{ s.session_id }}"
+              hx-target="#v1-beacon-detail"
+              hx-swap="innerHTML"
+              onclick="document.getElementById('v1-beacon-detail').scrollIntoView({behavior:'smooth'});">
+        {{ s.host_id }} / {{ s.process_id }}
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Session detail slot (htmx target) -->
+<div id="v1-beacon-detail" style="margin-top:.5rem;"></div>
+
+{% endif %}
+</div><!-- /content -->
+{% endblock %}
+
+{% block scripts %}
+{% if c2_geo_points %}
+<script src="https://unpkg.com/topojson-client@3"></script>
+<script>
+(function () {
+  var GEO     = {{ c2_geo_points | tojson }};
+  var canvas  = document.getElementById('c2-map');
+  var loading = document.getElementById('c2-map-loading');
+  var markers = document.getElementById('c2-map-markers');
+  if (!canvas || !GEO.length) return;
+
+  var W = 700, H = 360;
+  var ctx = canvas.getContext('2d');
+
+  // Mercator: lon/lat → canvas pixel coords (on the 700×360 buffer)
+  function project(lon, lat) {
+    var x = ((lon + 180) / 360) * W;
+    var r = lat * Math.PI / 180;
+    var y = H / 2 - (H * Math.log(Math.tan(Math.PI / 4 + r / 2))) / (2 * Math.PI);
+    return [x, y];
+  }
+
+  function drawMap(features) {
+    // Dark background
+    ctx.fillStyle = '#03030a';
+    ctx.fillRect(0, 0, W, H);
+
+    // Country fills + outlines
+    ctx.fillStyle   = '#0c0c1e';
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth   = 0.4;
+    features.forEach(function (feat) {
+      var geom  = feat.geometry;
+      var rings = geom.type === 'Polygon'      ? geom.coordinates
+                : geom.type === 'MultiPolygon' ? [].concat.apply([], geom.coordinates)
+                : [];
+      rings.forEach(function (ring) {
+        ctx.beginPath();
+        ring.forEach(function (c, i) {
+          var p = project(c[0], c[1]);
+          i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]);
+        });
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      });
+    });
+
+    // C2 glow + dot drawn on canvas
+    GEO.forEach(function (pt) {
+      var p    = project(pt.lon, pt.lat);
+      var grad = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], 16);
+      grad.addColorStop(0, 'rgba(255,32,32,0.4)');
+      grad.addColorStop(1, 'rgba(255,32,32,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(p[0], p[1], 16, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ff2828';
+      ctx.beginPath(); ctx.arc(p[0], p[1], 4, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // Inject keyframes for pulsing rings
+    var style = document.createElement('style');
+    style.textContent =
+      '@keyframes c2ring{0%{width:6px;height:6px;opacity:.85}' +
+      '100%{width:48px;height:48px;opacity:0}}';
+    document.head.appendChild(style);
+
+    // Overlaid CSS ring animations — percentage-positioned so they scale with the canvas
+    GEO.forEach(function (pt, i) {
+      var p    = project(pt.lon, pt.lat);
+      var pctX = (p[0] / W * 100).toFixed(3) + '%';
+      var pctY = (p[1] / H * 100).toFixed(3) + '%';
+      var d1   = (i * 0.45).toFixed(2) + 's';
+      var d2   = (i * 0.45 + 0.7).toFixed(2) + 's';
+      var el   = document.createElement('div');
+      el.style.cssText = 'position:absolute;left:' + pctX + ';top:' + pctY + ';width:0;height:0;';
+      el.innerHTML =
+        '<div style="position:absolute;border-radius:50%;border:1.5px solid rgba(255,40,40,.75);' +
+        'animation:c2ring 2.2s ' + d1 + ' ease-out infinite;transform:translate(-50%,-50%);"></div>' +
+        '<div style="position:absolute;border-radius:50%;border:1px solid rgba(255,40,40,.4);' +
+        'animation:c2ring 2.2s ' + d2 + ' ease-out infinite;transform:translate(-50%,-50%);"></div>';
+      markers.appendChild(el);
+    });
+
+    // Fade out loading overlay
+    if (loading) {
+      loading.style.opacity = '0';
+      setTimeout(function () { if (loading.parentNode) loading.remove(); }, 500);
+    }
+  }
+
+  function tryInit(retries) {
+    if (typeof topojson === 'undefined') {
+      if (retries > 0) return setTimeout(function () { tryInit(retries - 1); }, 400);
+      if (loading) loading.innerHTML = '<span style="color:#555;font-size:11px;">Map unavailable</span>';
+      return;
+    }
+    fetch('https://unpkg.com/world-atlas@2/countries-110m.json')
+      .then(function (r) { return r.json(); })
+      .then(function (world) {
+        drawMap(topojson.feature(world, world.objects.countries).features);
+      })
+      .catch(function () {
+        if (loading) loading.innerHTML = '<span style="color:#555;font-size:11px;">Failed to load map data</span>';
+      });
+  }
+
+  tryInit(15);
+})();
+</script>
+{% endif %}
+{% endblock %}

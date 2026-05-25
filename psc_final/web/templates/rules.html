@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    Rules
+    {% if detections or yara_text or sigma_rules %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {% if detections %}{{ detections|length }} detection{% if yara_text or sigma_rules %} · {% endif %}{% endif %}
+      {% if rule_count %}{{ rule_count }} YARA{% if sigma_rules %} · {% endif %}{% endif %}
+      {% if sigma_rules %}{{ sigma_rules|length }} Sigma{% endif %}
+      {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+</header>
+
+<!-- Sub-tab nav -->
+<div class="subtab-nav">
+  <button class="subtab-btn st-active" onclick="switchTab('detection', this)">Detection Rules</button>
+  <button class="subtab-btn"           onclick="switchTab('yara', this)">YARA Rules</button>
+  <button class="subtab-btn"           onclick="switchTab('sigma', this)">Sigma Rules</button>
+</div>
+
+{# ═══════════════════════════════════════════════════════ DETECTION TAB #}
+<div id="tab-detection" class="tab-pane st-visible">
+<div class="content">
+{% if not detections %}
+<div class="empty-state">
+  <div style="font-size:28px;margin-bottom:.5rem">🔍</div>
+  <p>No detection rules — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+  <p style="margin-top:.25rem;font-size:12px">Rules are generated for sessions scoring ≥ 40.</p>
+</div>
+{% else %}
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+  <div class="seg-tabs">
+    {% set siems = [('sentinel','Sentinel'),('splunk','Splunk'),('qradar','QRadar'),('elastic','Elastic'),('chronicle','Chronicle')] %}
+    {% for slug, label in siems %}
+    <button class="seg-tab siem-tab {% if loop.first %}active{% endif %}"
+            onclick="switchSiem(event,'{{ slug }}')" data-slug="{{ slug }}">{{ label }}</button>
+    {% endfor %}
+  </div>
+  <div style="display:flex;gap:6px;">
+    <a href="/detections/download/sentinel"  class="btn btn-sm">KQL ↓</a>
+    <a href="/detections/download/splunk"    class="btn btn-sm">SPL ↓</a>
+    <a href="/detections/download/qradar"    class="btn btn-sm">AQL ↓</a>
+    <a href="/detections/download/elastic"   class="btn btn-sm">EQL ↓</a>
+    <a href="/detections/download/chronicle" class="btn btn-sm">YARA-L ↓</a>
+  </div>
+</div>
+
+{% macro det_card(d, query, lang) %}
+<div class="detection-card" style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;overflow:hidden;">
+  <div style="display:flex;align-items:center;gap:8px;padding:.6rem 1rem;background:var(--bg);border-bottom:0.5px solid var(--border);">
+    <span class="badge sev-{{ d.severity }}">{{ d.severity }}</span>
+    <span style="font-size:13px;font-weight:500;">{{ d.title }}</span>
+    <span class="ioc-chip" style="margin-left:auto;">{{ d.mitre }}</span>
+    <button class="btn btn-sm" onclick="copyDetQuery(this)" style="font-size:10px;padding:2px 8px;">Copy</button>
+  </div>
+  <pre class="code-block" style="border:none;border-radius:0;margin:0;max-height:220px;overflow-y:auto;"><code class="{{ lang }}">{{ query }}</code></pre>
+</div>
+{% endmacro %}
+
+<div id="siem-sentinel" class="siem-panel">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;">
+    <span style="font-size:12px;color:var(--text3);"><code class="mono">Event</code> table · <code class="mono">EventID == 4104</code> · <code class="mono">ago(7d)</code></span>
+    <a href="/detections/download/sentinel" class="btn btn-primary btn-sm">Download .kql ↓</a>
+  </div>
+  {% for d in detections %}{{ det_card(d, d.kql, 'language-kusto') }}{% endfor %}
+</div>
+<div id="siem-splunk" class="siem-panel" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;">
+    <span style="font-size:12px;color:var(--text3);"><code class="mono">index=wineventlog EventCode=4104</code> · <code class="mono">earliest=-7d</code></span>
+    <a href="/detections/download/splunk" class="btn btn-primary btn-sm">Download .spl ↓</a>
+  </div>
+  {% for d in detections %}{{ det_card(d, d.spl, 'language-bash') }}{% endfor %}
+</div>
+<div id="siem-qradar" class="siem-panel" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;">
+    <span style="font-size:12px;color:var(--text3);"><code class="mono">devicetype=12 AND eventid=4104</code> · <code class="mono">LAST 7 DAYS</code></span>
+    <a href="/detections/download/qradar" class="btn btn-primary btn-sm">Download .aql ↓</a>
+  </div>
+  {% for d in detections %}{{ det_card(d, d.aql, 'language-sql') }}{% endfor %}
+</div>
+<div id="siem-elastic" class="siem-panel" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;">
+    <span style="font-size:12px;color:var(--text3);">Elastic Security · <code class="mono">winlogbeat-*</code> or <code class="mono">logs-windows.*</code> · EQL</span>
+    <a href="/detections/download/elastic" class="btn btn-primary btn-sm">Download .eql ↓</a>
+  </div>
+  {% for d in detections %}{{ det_card(d, d.eql, 'language-sql') }}{% endfor %}
+</div>
+<div id="siem-chronicle" class="siem-panel" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;">
+    <span style="font-size:12px;color:var(--text3);">Google Chronicle · YARA-L 2.0 · <code class="mono">principal.process.command_line</code></span>
+    <a href="/detections/download/chronicle" class="btn btn-primary btn-sm">Download .yaral ↓</a>
+  </div>
+  {% for d in detections %}{{ det_card(d, d.yaral, 'language-yaml') }}{% endfor %}
+</div>
+{% endif %}
+</div>
+</div>
+
+{# ═══════════════════════════════════════════════════════ YARA TAB #}
+<div id="tab-yara" class="tab-pane">
+<div class="content">
+{% if not rule_count %}
+<div class="empty-state">
+  <div style="font-size:28px;margin-bottom:.5rem">⬆</div>
+  <p>No YARA rules — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+</div>
+{% else %}
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-bottom:0.5px solid var(--border);background:var(--bg);">
+    <span style="font-size:12px;font-weight:500;color:var(--text2);">dissect_rules.yar &nbsp;·&nbsp; {{ rule_count }} rule{{ 's' if rule_count != 1 else '' }}</span>
+    <a href="/yara/download" class="btn btn-sm" style="font-size:11px;">Download ↓</a>
+  </div>
+  <pre class="code-block" style="border:none;border-radius:0;margin:0;max-height:72vh;overflow-y:auto;"><code class="language-c">{{ yara_text }}</code></pre>
+</div>
+<div style="margin-top:1rem;display:flex;justify-content:flex-end;">
+  <a href="/yara/download" class="btn btn-primary">Download YARA rules ↓</a>
+</div>
+{% endif %}
+</div>
+</div>
+
+{# ═══════════════════════════════════════════════════════ SIGMA TAB #}
+<div id="tab-sigma" class="tab-pane">
+<div class="content">
+{% if not sigma_rules %}
+<div class="empty-state">
+  <div style="font-size:28px;margin-bottom:.5rem">📋</div>
+  <p>No Sigma rules — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+</div>
+{% else %}
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+  <span style="font-size:12px;color:var(--text3);">YAML format · {{ sigma_rules|length }} rule{{ 's' if sigma_rules|length != 1 else '' }} · compatible with all major SIEM backends</span>
+  <a href="/sigma/download" class="btn btn-primary btn-sm">Download all ↓</a>
+</div>
+{% for rule in sigma_rules %}
+{% set lev_cls = {'critical':'sev-critical','high':'sev-high','medium':'sev-medium','low':'sev-low'}.get(rule.level, 'sev-low') %}
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;overflow:hidden;">
+  <div style="display:flex;align-items:center;gap:8px;padding:.6rem 1rem;background:var(--bg);border-bottom:0.5px solid var(--border);">
+    <span class="badge {{ lev_cls }}">{{ rule.level }}</span>
+    <span style="font-size:13px;font-weight:500;">{{ rule.title }}</span>
+    {% if rule.mitre_id %}<span class="ioc-chip">{{ rule.mitre_id }}</span>{% endif %}
+    <span class="ioc-chip" style="margin-left:auto;">{{ rule.technique_id }}</span>
+    <button class="btn btn-sm" onclick="copySigma(this)" style="font-size:10px;padding:2px 8px;">Copy</button>
+  </div>
+  <pre class="code-block" style="border:none;border-radius:0;margin:0;max-height:260px;overflow-y:auto;"><code class="language-yaml">{{ rule.to_yaml() }}</code></pre>
+</div>
+{% endfor %}
+<div style="margin-top:1rem;display:flex;justify-content:flex-end;">
+  <a href="/sigma/download" class="btn btn-primary">Download all Sigma rules ↓</a>
+</div>
+{% endif %}
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var _rulesTabs = ['detection','yara','sigma'];
+function switchTab(name, btn) {
+  _rulesTabs.forEach(function(t) {
+    var p = document.getElementById('tab-' + t);
+    if (p) { p.classList.remove('st-visible'); }
+  });
+  var pane = document.getElementById('tab-' + name);
+  if (pane) pane.classList.add('st-visible');
+  btn.closest('.subtab-nav').querySelectorAll('.subtab-btn').forEach(function(b) {
+    b.classList.remove('st-active');
+  });
+  btn.classList.add('st-active');
+  if (typeof Prism !== 'undefined') Prism.highlightAllUnder(pane);
+}
+
+function switchSiem(event, name) {
+  document.querySelectorAll('.siem-panel').forEach(function(p) { p.style.display = 'none'; });
+  document.querySelectorAll('.siem-tab').forEach(function(t) { t.classList.remove('active'); });
+  var panel = document.getElementById('siem-' + name);
+  if (panel) panel.style.display = 'block';
+  event.currentTarget.classList.add('active');
+  if (typeof Prism !== 'undefined') Prism.highlightAllUnder(panel);
+}
+
+function copyDetQuery(btn) {
+  var code = btn.closest('.detection-card').querySelector('code');
+  if (typeof copyText === 'function') { copyText(code.textContent, 'Query'); }
+  else { navigator.clipboard.writeText(code.textContent).then(function() {
+    var orig = btn.textContent; btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = orig; }, 2000);
+  }); }
+}
+
+function copySigma(btn) {
+  var pre = btn.closest('div').nextElementSibling;
+  var code = (pre.querySelector('code') || pre);
+  navigator.clipboard.writeText(code.textContent).then(function() {
+    var orig = btn.textContent; btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = orig; }, 2000);
+  });
+}
+</script>
+{% endblock %}

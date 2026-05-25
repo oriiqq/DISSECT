@@ -1,0 +1,171 @@
+{# Standalone fragment — rendered by /analytics/fragment, loaded into Dashboard Charts tab #}
+<div class="content">
+
+{% if not has_data %}
+<div class="empty-state">
+  <p>No analysis loaded — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+</div>
+{% else %}
+
+<script id="an-data" type="application/json">
+{
+  "tier_counts":       {{ tier_counts | tojson }},
+  "all_scores":        {{ all_scores  | tojson }},
+  "scores_over_time":  {{ scores_over_time | tojson }},
+  "technique_counts":  {{ technique_counts | tojson }},
+  "tactic_rows":       {{ tactic_rows | tojson }},
+  "host_risks":        {{ host_risks  | tojson }},
+  "tempo_counts":      {{ tempo_counts | tojson }},
+  "ioc_type_counts":   {{ ioc_type_counts | tojson }},
+  "top_iocs":          {{ top_iocs | tojson }},
+  "dur_buckets":       {{ dur_buckets | tojson }},
+  "dur_labels":        {{ dur_labels  | tojson }}
+}
+</script>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+  <div style="background:var(--red-bg);border:1px solid rgba(229,52,58,.2);border-radius:var(--radius);padding:6px 14px;font-weight:600;color:var(--red-text);">
+    <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ tier_counts.get('P1_INCIDENT',0) }}</span>
+    <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">P1 Incidents</span>
+  </div>
+  <div style="background:var(--amber-bg);border:1px solid rgba(217,119,6,.2);border-radius:var(--radius);padding:6px 14px;font-weight:600;color:var(--amber-text);">
+    <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ tier_counts.get('P2_ALERT',0) }}</span>
+    <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">P2 Alerts</span>
+  </div>
+  <div style="background:var(--teal-bg);border:1px solid rgba(5,150,105,.2);border-radius:var(--radius);padding:6px 14px;font-weight:600;color:var(--teal-text);">
+    <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ tier_counts.get('P3_WARNING',0) }}</span>
+    <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">P3 Warnings</span>
+  </div>
+  <div style="background:var(--blue-bg);border:1px solid rgba(37,99,235,.2);border-radius:var(--radius);padding:6px 14px;font-weight:600;color:var(--blue-text);">
+    <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ host_risks|length }}</span>
+    <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">Unique Hosts</span>
+  </div>
+  <div style="background:var(--purple-bg);border:1px solid rgba(91,108,249,.2);border-radius:var(--radius);padding:6px 14px;font-weight:600;color:var(--purple-text);">
+    <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ unique_iocs }}</span>
+    <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">Unique IOCs</span>
+  </div>
+  <div style="background:var(--amber-bg);border:1px solid rgba(217,119,6,.2);border-radius:var(--radius);padding:6px 14px;font-weight:600;color:var(--amber-text);">
+    <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ beacon_count }}</span>
+    <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">Beacon Sessions</span>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;">
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+    <div class="stat-label" style="margin-bottom:.5rem;">Alert Tiers</div>
+    <canvas id="an-tier" width="200" height="130" style="width:100%;height:130px;display:block;"></canvas>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+    <div class="stat-label" style="margin-bottom:.5rem;">Score Distribution</div>
+    <canvas id="an-score-hist" width="200" height="130" style="width:100%;height:130px;display:block;"></canvas>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+    <div class="stat-label" style="margin-bottom:.5rem;">Session Tempo</div>
+    <canvas id="an-tempo" width="200" height="130" style="width:100%;height:130px;display:block;"></canvas>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+    <div class="stat-label" style="margin-bottom:.5rem;">IOC Types</div>
+    <canvas id="an-ioc-types" width="200" height="130" style="width:100%;height:130px;display:block;"></canvas>
+  </div>
+</div>
+
+{% if scores_over_time %}
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:12px;">
+  <div class="stat-label" style="margin-bottom:.5rem;">Risk Score Over Time</div>
+  <canvas id="an-sot" width="1000" height="160" style="width:100%;height:160px;display:block;"></canvas>
+</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+    <div class="stat-label" style="margin-bottom:.5rem;">Top Techniques</div>
+    <canvas id="an-techs" width="500" height="240" style="width:100%;height:240px;display:block;"></canvas>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+    <div class="stat-label" style="margin-bottom:.5rem;">Host Risk Breakdown</div>
+    <canvas id="an-hosts" width="500" height="240" style="width:100%;height:240px;display:block;"></canvas>
+  </div>
+</div>
+
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:12px;">
+  <div class="section-header" style="margin-bottom:.5rem;">
+    <span class="section-title">MITRE ATT&amp;CK Tactic Coverage</span>
+    <span style="font-size:11px;color:var(--text3);">Technique hits grouped by attack phase</span>
+  </div>
+  <canvas id="an-tactics" width="1000" height="190" style="width:100%;height:190px;display:block;"></canvas>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+    <div class="stat-label" style="margin-bottom:.5rem;">Top IOCs by Frequency</div>
+    <canvas id="an-iocs" width="500" height="200" style="width:100%;height:200px;display:block;"></canvas>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+    <div class="stat-label" style="margin-bottom:.5rem;">Session Duration Distribution</div>
+    <canvas id="an-dur" width="500" height="200" style="width:100%;height:200px;display:block;"></canvas>
+  </div>
+</div>
+
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:0;">
+  <div class="section-header" style="margin-bottom:.875rem;">
+    <span class="section-title">Detection Coverage</span>
+    <span style="font-size:11px;color:var(--text3);">{{ sigma_covered_count }} of {{ total_techniques }} techniques have dedicated Sigma rules &nbsp;·&nbsp; <strong style="color:var(--teal-text);">{{ sigma_pct }}%</strong></span>
+  </div>
+  <div style="height:10px;background:var(--bg3);border-radius:99px;overflow:hidden;">
+    <div style="height:100%;width:{{ sigma_pct }}%;background:var(--teal);border-radius:99px;"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:5px;">
+    <span>{{ sigma_covered_count }} techniques covered</span>
+    <span>{{ total_techniques - sigma_covered_count }} gaps remaining</span>
+  </div>
+</div>
+
+<script>
+(function() {
+  function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+  function noData(ctx,W,H){ctx.save();ctx.fillStyle=css('--text3');ctx.font='11px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('No data',W/2,H/2);ctx.restore();}
+  function rRect(ctx,x,y,w,h,r){if(w<=0||h<=0)return;r=Math.min(r,w/2,h/2);if(ctx.roundRect)ctx.roundRect(x,y,w,h,r);else ctx.rect(x,y,w,h);}
+  function setupCanvas(id){var c=document.getElementById(id);if(!c)return null;var dpr=window.devicePixelRatio||1,W=c.offsetWidth||c.width,H=c.offsetHeight||c.height;c.width=W*dpr;c.height=H*dpr;var ctx=c.getContext('2d');ctx.scale(dpr,dpr);return{ctx,W,H};}
+  function donut(id,segs){var s=setupCanvas(id);if(!s)return;var ctx=s.ctx,W=s.W,H=s.H;if(!segs||!segs.length){noData(ctx,W,H);return;}var total=segs.reduce(function(a,b){return a+b.value;},0);if(!total){noData(ctx,W,H);return;}var cx=W*.3,cy=H/2,ro=Math.min(cx,cy)*.88,ri=ro*.5,angle=-Math.PI/2;for(var i=0;i<segs.length;i++){var sweep=(segs[i].value/total)*2*Math.PI;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,ro,angle,angle+sweep);ctx.closePath();ctx.fillStyle=segs[i].color;ctx.fill();angle+=sweep;}ctx.beginPath();ctx.arc(cx,cy,ri,0,2*Math.PI);ctx.fillStyle=css('--card');ctx.fill();ctx.save();ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=css('--text');ctx.font='bold '+Math.round(ri*.7)+'px sans-serif';ctx.fillText(String(total),cx,cy-ri*.12);ctx.fillStyle=css('--text3');ctx.font=Math.round(ri*.32)+'px sans-serif';ctx.fillText('total',cx,cy+ri*.32);ctx.restore();var lx=W*.58,rowH=H/(segs.length+1),startY=(H-rowH*segs.length)/2+rowH*.5;for(var i=0;i<segs.length;i++){var ly=startY+i*rowH;ctx.fillStyle=segs[i].color;ctx.beginPath();rRect(ctx,lx,ly-4,8,8,2);ctx.fill();ctx.fillStyle=css('--text2');ctx.font='10px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(segs[i].label,lx+12,ly);ctx.fillStyle=css('--text');ctx.font='bold 10px sans-serif';ctx.textAlign='right';ctx.fillText(String(segs[i].value),W-4,ly);}};
+  function vertBars(id,labels,values,colors){var s=setupCanvas(id);if(!s)return;var ctx=s.ctx,W=s.W,H=s.H;if(!values||!values.length){noData(ctx,W,H);return;}var maxV=Math.max.apply(null,values);if(!maxV){noData(ctx,W,H);return;}var chartH=H-18,n=values.length,padL=4,padR=4,gap=4,barW=(W-padL-padR-gap*(n-1))/n;ctx.strokeStyle=css('--border');ctx.lineWidth=.5;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(padL,2);ctx.lineTo(W-padR,2);ctx.stroke();ctx.setLineDash([]);for(var i=0;i<n;i++){var bx=padL+i*(barW+gap),bh=(values[i]/maxV)*(chartH-4),by=chartH-bh,col=colors?(colors[i]||css('--teal')):css('--teal');if(bh>0){ctx.fillStyle=col;ctx.beginPath();rRect(ctx,bx,by,barW,bh,3);ctx.fill();}if(values[i]>0){ctx.fillStyle=css('--text2');ctx.font='bold 9px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(String(values[i]),bx+barW/2,by-1);}ctx.fillStyle=css('--text3');ctx.font='7px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(labels[i]||'',bx+barW/2,chartH+2);}};
+  function horizBars(id,labels,values,color){var s=setupCanvas(id);if(!s)return;var ctx=s.ctx,W=s.W,H=s.H;if(!labels||!labels.length){noData(ctx,W,H);return;}var maxV=Math.max.apply(null,values);if(!maxV){noData(ctx,W,H);return;}var lw=W*.38,vw=W-lw-28,n=labels.length,rowH=H/n,barH=Math.min(11,rowH*.52),col=color||css('--teal');for(var i=0;i<n;i++){var cy=i*rowH+rowH/2,lbl=String(labels[i]||'');if(lbl.length>22)lbl=lbl.substring(0,21)+'…';ctx.fillStyle=css('--text2');ctx.font='10px sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(lbl,lw-6,cy);ctx.fillStyle=css('--border');ctx.beginPath();rRect(ctx,lw,cy-barH/2,vw,barH,2);ctx.fill();var bw=(values[i]/maxV)*vw;if(bw>0){ctx.fillStyle=col;ctx.beginPath();rRect(ctx,lw,cy-barH/2,bw,barH,2);ctx.fill();}ctx.fillStyle=css('--text3');ctx.font='9px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(String(values[i]||0),lw+vw+4,cy);}};
+  function stackedHorizBars(id,stacks,colors){var s=setupCanvas(id);if(!s)return;var ctx=s.ctx,W=s.W,H=s.H;if(!stacks||!stacks.length){noData(ctx,W,H);return;}var legendH=16,lnames=['P1','P2','P3'],lx=4;ctx.font='9px sans-serif';ctx.textBaseline='middle';for(var li=0;li<lnames.length;li++){ctx.fillStyle=colors[li]||css('--teal');ctx.fillRect(lx,legendH/2-4,8,8);ctx.fillStyle=css('--text3');ctx.textAlign='left';ctx.fillText(lnames[li],lx+11,legendH/2);lx+=32;}var maxTotal=0;for(var i=0;i<stacks.length;i++){var sum=stacks[i].values.reduce(function(a,b){return a+b;},0);if(sum>maxTotal)maxTotal=sum;}if(!maxTotal){noData(ctx,W,H);return;}var lw=W*.32,countW=28,vw=W-lw-countW,n=stacks.length,availH=H-legendH,rowH=availH/n,barH=Math.min(12,rowH*.55);for(var i=0;i<n;i++){var cy=legendH+i*rowH+rowH/2,row=stacks[i],lbl=String(row.label||'');if(lbl.length>18)lbl=lbl.substring(0,17)+'…';ctx.fillStyle=css('--text2');ctx.font='10px sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(lbl,lw-6,cy);ctx.fillStyle=css('--border');ctx.beginPath();rRect(ctx,lw,cy-barH/2,vw,barH,2);ctx.fill();var total=row.values.reduce(function(a,b){return a+b;},0),bx=lw;for(var j=0;j<row.values.length;j++){if(row.values[j]<=0)continue;var segW=(row.values[j]/maxTotal)*vw;ctx.fillStyle=colors[j]||css('--teal');ctx.beginPath();rRect(ctx,bx,cy-barH/2,segW,barH,2);ctx.fill();bx+=segW;}ctx.fillStyle=css('--text3');ctx.font='9px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(String(total),lw+vw+4,cy);}};
+  function lineChart(id,points){var s=setupCanvas(id);if(!s)return;var ctx=s.ctx,W=s.W,H=s.H;if(!points||points.length<2){noData(ctx,W,H);return;}var ML=40,MB=25,MT=6,MR=8,cW=W-ML-MR,cH=H-MT-MB,yLabels=[0,25,50,75,100];ctx.strokeStyle=css('--border');ctx.lineWidth=.5;ctx.setLineDash([3,3]);ctx.font='9px sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';for(var gi=0;gi<yLabels.length;gi++){var yv=yLabels[gi],gy=MT+cH-(yv/100)*cH;ctx.beginPath();ctx.moveTo(ML,gy);ctx.lineTo(W-MR,gy);ctx.stroke();ctx.fillStyle=css('--text3');ctx.fillText(String(yv),ML-4,gy);}ctx.setLineDash([]);var n=points.length;function px(i){return ML+(i/(n-1))*cW;}function py(sc){return MT+cH-(Math.min(100,Math.max(0,sc))/100)*cH;}var grad=ctx.createLinearGradient(0,MT,0,MT+cH);grad.addColorStop(0,'rgba(229,52,58,.15)');grad.addColorStop(.5,'rgba(5,150,105,.08)');grad.addColorStop(1,'rgba(5,150,105,0)');ctx.beginPath();ctx.moveTo(px(0),py(points[0].score));for(var i=1;i<n;i++)ctx.lineTo(px(i),py(points[i].score));ctx.lineTo(px(n-1),MT+cH);ctx.lineTo(px(0),MT+cH);ctx.closePath();ctx.fillStyle=grad;ctx.fill();for(var i=1;i<n;i++){var sc=points[i].score,lc=sc>=80?css('--red'):sc>=60?css('--amber'):css('--teal');ctx.strokeStyle=lc;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(px(i-1),py(points[i-1].score));ctx.lineTo(px(i),py(sc));ctx.stroke();}for(var i=0;i<n;i++){ctx.beginPath();ctx.arc(px(i),py(points[i].score),3,0,2*Math.PI);ctx.fillStyle=css('--text3');ctx.fill();ctx.strokeStyle=css('--card');ctx.lineWidth=1;ctx.stroke();}var step=Math.ceil(n/8);ctx.fillStyle=css('--text3');ctx.font='8px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';for(var i=0;i<n;i+=step){var lbl=String(points[i].ts||'');if(lbl.length>12)lbl=lbl.substring(0,12);ctx.fillText(lbl,px(i),MT+cH+4);}};
+  function tacticBars(id,tactics){var s=setupCanvas(id);if(!s)return;var ctx=s.ctx,W=s.W,H=s.H;if(!tactics||!tactics.length){noData(ctx,W,H);return;}var maxCount=0;for(var i=0;i<tactics.length;i++)if(tactics[i].count>maxCount)maxCount=tactics[i].count;var lw=W*.20,metaW=52,vw=W-lw-metaW,n=tactics.length,rowH=H/n,barH=Math.min(13,rowH*.52);for(var i=0;i<n;i++){var t=tactics[i],cy=i*rowH+rowH/2,lbl=String(t.name||'');if(lbl.length>16)lbl=lbl.substring(0,15)+'…';ctx.fillStyle=t.active?css('--text2'):css('--text3');ctx.font='10px sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(lbl,lw-6,cy);ctx.fillStyle=css('--bg3');ctx.beginPath();rRect(ctx,lw,cy-barH/2,vw,barH,2);ctx.fill();var barColor=(!t.active||t.count===0)?css('--bg3'):(maxCount>0&&t.count/maxCount>=.5?css('--red'):css('--amber'));if(t.count>0&&maxCount>0){var bw=(t.count/maxCount)*vw;ctx.fillStyle=barColor;ctx.beginPath();rRect(ctx,lw,cy-barH/2,bw,barH,2);ctx.fill();}ctx.fillStyle=t.active?css('--text2'):css('--text3');ctx.font='9px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(t.count+'/'+t.total,lw+vw+5,cy);}};
+  requestAnimationFrame(function(){
+    var dataEl=document.getElementById('an-data');if(!dataEl)return;
+    var d;try{d=JSON.parse(dataEl.textContent||dataEl.innerText);}catch(e){return;}
+    var RED=css('--red'),AMBER=css('--amber'),TEAL=css('--teal'),BLUE=css('--blue'),ACCENT=css('--accent'),TEXT3=css('--text3'),DIM=css('--bg3');
+    var tc=d.tier_counts||{},tierSegs=[];
+    if(tc['P1_INCIDENT'])tierSegs.push({label:'P1',value:tc['P1_INCIDENT'],color:RED});
+    if(tc['P2_ALERT'])tierSegs.push({label:'P2',value:tc['P2_ALERT'],color:AMBER});
+    if(tc['P3_WARNING'])tierSegs.push({label:'P3',value:tc['P3_WARNING'],color:TEAL});
+    if(tc['INFO'])tierSegs.push({label:'Info',value:tc['INFO'],color:BLUE});
+    if(tc['CLEAN'])tierSegs.push({label:'Clean',value:tc['CLEAN'],color:DIM});
+    donut('an-tier',tierSegs);
+    var scores=d.all_scores||[],buckets=[0,0,0,0,0];
+    for(var i=0;i<scores.length;i++){var sc=scores[i];if(sc<20)buckets[0]++;else if(sc<40)buckets[1]++;else if(sc<60)buckets[2]++;else if(sc<80)buckets[3]++;else buckets[4]++;}
+    vertBars('an-score-hist',['0-20','20-40','40-60','60-80','80+'],[buckets[0],buckets[1],buckets[2],buckets[3],buckets[4]],[DIM,TEAL,AMBER,AMBER,RED]);
+    var tc2=d.tempo_counts||{},tempoL=[],tempoV=[];
+    for(var k in tc2){if(!tc2.hasOwnProperty(k))continue;tempoL.push(k.replace(/_/g,' '));tempoV.push(tc2[k]);}
+    horizBars('an-tempo',tempoL,tempoV,BLUE);
+    var itc=d.ioc_type_counts||{},iocSegs=[],ci=0,iocColors=[ACCENT,TEAL,AMBER,RED,BLUE,TEXT3];
+    for(var k in itc){if(!itc.hasOwnProperty(k))continue;iocSegs.push({label:k,value:itc[k],color:iocColors[ci%iocColors.length]});ci++;}
+    donut('an-ioc-types',iocSegs);
+    lineChart('an-sot',d.scores_over_time||[]);
+    var tcs=d.technique_counts||[],techL=[],techV=[];
+    for(var i=0;i<tcs.length;i++){techL.push(String(tcs[i].tech||''));techV.push(tcs[i].count||0);}
+    horizBars('an-techs',techL,techV,TEAL);
+    var hr=d.host_risks||[],hostStacks=[];
+    for(var i=0;i<hr.length;i++)hostStacks.push({label:String(hr[i].host_id||''),values:[hr[i].p1||0,hr[i].p2||0,hr[i].p3||0]});
+    stackedHorizBars('an-hosts',hostStacks,[RED,AMBER,TEAL]);
+    tacticBars('an-tactics',d.tactic_rows||[]);
+    var tiocs=d.top_iocs||[],iocL=[],iocV=[];
+    for(var i=0;i<tiocs.length;i++){var lbl=String(tiocs[i].value||'');if(lbl.length>35)lbl=lbl.substring(0,34)+'…';iocL.push(lbl);iocV.push(tiocs[i].count||0);}
+    horizBars('an-iocs',iocL,iocV,AMBER);
+    vertBars('an-dur',d.dur_labels||[],d.dur_buckets||[],[BLUE,BLUE,TEAL,AMBER,RED]);
+  });
+})();
+</script>
+{% endif %}
+</div>

@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    IOC Hub
+    {% if total_iocs %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {{ total_iocs }} unique indicator{{ 's' if total_iocs != 1 else '' }}
+      {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+  {% if total_iocs %}
+  <div style="display:flex;gap:6px;">
+    <a href="/iocs/download/txt" class="btn btn-sm">TXT ↓</a>
+    <a href="/iocs/download/csv" class="btn btn-sm btn-primary">CSV ↓</a>
+  </div>
+  {% endif %}
+</header>
+
+<div class="content">
+{% if not ioc_entries %}
+<div class="empty-state">
+  <svg style="width:40px;height:40px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+    <circle cx="11" cy="11" r="8"/>
+    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+  </svg>
+  <p>No IOCs — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+  <p style="margin-top:.25rem;font-size:12px">URLs, IPs, file hashes, and Windows paths are extracted automatically.</p>
+</div>
+{% else %}
+
+<!-- ── Type filter tabs ── -->
+<div class="seg-tabs" style="margin-bottom:1.25rem;">
+  {% set tabs = [
+    ('all',  'All',     total_iocs),
+    ('url',  'URLs',    ioc_counts.url),
+    ('ip',   'IPs',     ioc_counts.ip),
+    ('hash', 'Hashes',  ioc_counts.hash),
+    ('path', 'Paths',   ioc_counts.path),
+  ] %}
+  {% for slug, label, count in tabs %}
+  <button class="seg-tab ioc-tab{% if loop.first %} active{% endif %}"
+          onclick="filterIOCs('{{ slug }}')"
+          data-type="{{ slug }}">
+    {{ label }}{% if count %}&thinsp;<span style="opacity:.55;font-weight:400;">{{ count }}</span>{% endif %}
+  </button>
+  {% endfor %}
+</div>
+
+<!-- ── Search ── -->
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;">
+  <input id="ioc-search" type="text" placeholder="Search indicators…"
+         oninput="searchIOCs()"
+         style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:var(--radius);
+                background:var(--card);color:var(--text);width:280px;outline:none;
+                transition:border-color .12s, box-shadow .12s;"
+         onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 0 2px var(--accent-bg)'"
+         onblur="this.style.borderColor='';this.style.boxShadow=''">
+  <span id="ioc-count" style="font-size:11px;color:var(--text3);"></span>
+</div>
+
+<!-- ── IOC Infrastructure Graph ── -->
+{% if ioc_entries | length > 1 %}
+{% set graph_entries = ioc_entries[:40] %}
+{% set multi_session = graph_entries | selectattr('sessions') | list %}
+{% if multi_session | length > 1 %}
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);
+            margin-bottom:1.25rem;overflow:hidden;">
+  <div style="padding:.6rem 1rem .4rem;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px;">
+    <span style="font-size:12px;font-weight:600;">Infrastructure Graph</span>
+    <span style="font-size:10px;color:var(--text3);">IOC nodes linked by shared session — drag to explore</span>
+    <div style="margin-left:auto;display:flex;gap:10px;font-size:10px;color:var(--text3);">
+      <span><svg style="width:9px;height:9px;display:inline;vertical-align:middle;" viewBox="0 0 9 9"><circle cx="4.5" cy="4.5" r="4" fill="var(--blue)"/></svg> URL</span>
+      <span><svg style="width:9px;height:9px;display:inline;vertical-align:middle;" viewBox="0 0 9 9"><circle cx="4.5" cy="4.5" r="4" fill="var(--red)"/></svg> IP</span>
+      <span><svg style="width:9px;height:9px;display:inline;vertical-align:middle;" viewBox="0 0 9 9"><circle cx="4.5" cy="4.5" r="4" fill="var(--amber)"/></svg> Hash</span>
+      <span><svg style="width:9px;height:9px;display:inline;vertical-align:middle;" viewBox="0 0 9 9"><circle cx="4.5" cy="4.5" r="4" fill="var(--teal)"/></svg> Path</span>
+      <span><svg style="width:9px;height:9px;display:inline;vertical-align:middle;" viewBox="0 0 9 9"><rect x=".5" y=".5" width="8" height="8" rx="2" fill="var(--bg3)"/></svg> Session</span>
+    </div>
+  </div>
+  <canvas id="ioc-graph" height="280" style="width:100%;display:block;cursor:grab;"></canvas>
+  <div id="ioc-tooltip" style="display:none;position:absolute;background:var(--card);border:0.5px solid var(--border);
+       border-radius:var(--radius);padding:5px 9px;font-size:10.5px;pointer-events:none;
+       box-shadow:var(--shadow-sm);max-width:260px;word-break:break-all;z-index:10;"></div>
+</div>
+{% endif %}
+{% endif %}
+
+<!-- ── IOC Table ── -->
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:68px">Type</th>
+        <th>Indicator</th>
+        <th style="width:60px">Hits</th>
+        <th style="width:100px">Sessions</th>
+        <th style="width:56px"></th>
+      </tr>
+    </thead>
+    <tbody id="ioc-tbody">
+      {% for e in ioc_entries %}
+      <tr class="ioc-row" data-type="{{ e.ioc_type }}" data-value="{{ e.value | lower }}">
+        <td>
+          <span class="badge
+            {%- if e.ioc_type == 'url' %} tier-p2
+            {%- elif e.ioc_type == 'ip' %} tier-p1
+            {%- elif e.ioc_type == 'hash' %} tier-p3
+            {%- elif e.ioc_type == 'path' %} tier-info
+            {%- else %} tier-clean{%- endif %}">{{ e.ioc_type }}</span>
+        </td>
+        <td class="mono" style="font-size:11px;max-width:480px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            title="{{ e.value }}">{{ e.value }}</td>
+        <td style="font-size:12px;font-weight:600;">{{ e.count }}</td>
+        <td style="font-size:11px;color:var(--text3);">{{ e.sessions | length }}</td>
+        <td>
+          <button class="btn btn-sm" onclick="copyIOC(this, {{ e.value | tojson }})"
+                  style="font-size:10px;padding:2px 8px;">Copy</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── IOC Infrastructure Graph ── */
+(function initIOCGraph() {
+  const canvas = document.getElementById('ioc-graph');
+  if (!canvas) return;
+
+  const tooltip = document.getElementById('ioc-tooltip');
+
+  // Build graph data from the DOM table
+  const iocNodes = [], sessionNodes = [], edges = [];
+  const sessionIndex = {};
+  let nodeId = 0;
+
+  document.querySelectorAll('.ioc-row').forEach(row => {
+    const val     = row.dataset.value || '';
+    const type    = row.dataset.type  || 'other';
+    const sessTd  = row.querySelector('td:nth-child(4)');
+    const sessCount = sessTd ? parseInt(sessTd.textContent.trim()) || 0 : 0;
+    if (!val) return;
+
+    const iocId = 'ioc-' + nodeId++;
+    iocNodes.push({ id: iocId, label: val, type, sessCount });
+  });
+
+  // Only show graph if we have multi-session IOCs (potential shared infra)
+  const sharedIOCs = iocNodes.filter(n => n.sessCount > 1);
+  if (sharedIOCs.length < 2) { canvas.style.display = 'none'; return; }
+
+  // Use shared IOCs only + connect ones with same session count (heuristic for shared infra)
+  const nodes = sharedIOCs.slice(0, 30);
+  const edgeSet = new Set();
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      // Connect IOCs sharing a session count (simple heuristic)
+      if (nodes[i].sessCount === nodes[j].sessCount && nodes[i].sessCount > 1) {
+        const key = i + '-' + j;
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          edges.push({ a: i, b: j });
+        }
+      }
+    }
+  }
+
+  const TYPE_COLOR = {
+    url:   '#2563eb',
+    ip:    '#e5343a',
+    hash:  '#d97706',
+    path:  '#059669',
+    other: '#8e93ab',
+  };
+
+  const dpr = window.devicePixelRatio || 1;
+  const W   = () => parseInt(canvas.style.width || canvas.offsetWidth);
+  const H   = 280;
+
+  function resize() {
+    const w = canvas.parentElement.clientWidth;
+    canvas.style.width  = w + 'px';
+    canvas.width  = w * dpr;
+    canvas.height = H * dpr;
+  }
+  resize();
+  window.addEventListener('resize', () => { resize(); });
+
+  // Init positions in a circle
+  let positions = nodes.map((n, i) => {
+    const angle = (2 * Math.PI * i) / nodes.length;
+    const cx = W() / 2, cy = H / 2;
+    const r  = Math.min(cx, cy) * 0.65;
+    return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle), vx: 0, vy: 0 };
+  });
+
+  function applyForces() {
+    const REPEL = 1800, SPRING = 0.06, DAMP = 0.80, IDEAL = 120;
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = positions[j].x - positions[i].x;
+        const dy = positions[j].y - positions[i].y;
+        const d  = Math.sqrt(dx*dx + dy*dy) || 1;
+        const f  = REPEL / (d * d);
+        positions[i].vx -= dx/d*f; positions[i].vy -= dy/d*f;
+        positions[j].vx += dx/d*f; positions[j].vy += dy/d*f;
+      }
+    }
+    edges.forEach(e => {
+      const dx = positions[e.b].x - positions[e.a].x;
+      const dy = positions[e.b].y - positions[e.a].y;
+      const d  = Math.sqrt(dx*dx + dy*dy) || 1;
+      const stretch = (d - IDEAL) * SPRING;
+      const fx = dx/d * stretch, fy = dy/d * stretch;
+      positions[e.a].vx += fx; positions[e.a].vy += fy;
+      positions[e.b].vx -= fx; positions[e.b].vy -= fy;
+    });
+    positions = positions.map(p => ({
+      x: Math.max(28, Math.min(W() - 28, p.x + p.vx * DAMP)),
+      y: Math.max(24, Math.min(H  - 24, p.y + p.vy * DAMP)),
+      vx: p.vx * DAMP, vy: p.vy * DAMP,
+    }));
+  }
+
+  function draw() {
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W(), H);
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+    // Edges
+    edges.forEach(e => {
+      const a = positions[e.a], b = positions[e.b];
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = isDark ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.08)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+
+    // Nodes
+    nodes.forEach((n, i) => {
+      const p = positions[i];
+      const color = TYPE_COLOR[n.type] || TYPE_COLOR.other;
+      const r = Math.min(16, 8 + n.sessCount * 2);
+
+      // Glow
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 5, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.10;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Circle
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = isDark ? '#151b28' : '#fff';
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Type initial
+      ctx.font = `bold ${Math.min(10, r - 2)}px -apple-system,sans-serif`;
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(n.type[0].toUpperCase(), p.x, p.y);
+      ctx.textBaseline = 'alphabetic';
+
+      // Label (truncated)
+      const lbl = n.label.length > 18 ? n.label.slice(0, 8) + '…' + n.label.slice(-6) : n.label;
+      ctx.font = '8.5px -apple-system,sans-serif';
+      ctx.fillStyle = isDark ? '#8490b0' : '#8e93ab';
+      ctx.textAlign = 'center';
+      ctx.fillText(lbl, p.x, p.y + r + 10);
+    });
+  }
+
+  let frame = 0, simActive = true;
+  function loop() {
+    if (simActive) { applyForces(); if (++frame > 200) simActive = false; }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // Drag
+  let dragging = null, off = {x:0,y:0};
+  function nearestNode(mx, my) {
+    let best = null, bestD = 22;
+    nodes.forEach((n, i) => {
+      const p = positions[i];
+      const d = Math.sqrt((p.x-mx)**2 + (p.y-my)**2);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return best;
+  }
+  canvas.addEventListener('mousedown', e => {
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    dragging = nearestNode(mx, my);
+    if (dragging !== null) { off = {x: mx - positions[dragging].x, y: my - positions[dragging].y}; simActive = false; }
+  });
+  canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+    if (dragging !== null) {
+      positions[dragging].x = mx - off.x;
+      positions[dragging].y = my - off.y;
+      return;
+    }
+    const ni = nearestNode(mx, my);
+    if (ni !== null) {
+      const n = nodes[ni];
+      tooltip.innerHTML = `<strong>${n.type.toUpperCase()}</strong><br>${n.label}<br><span style="color:var(--text3);">${n.sessCount} session${n.sessCount!==1?'s':''}</span>`;
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX - canvas.getBoundingClientRect().left + 12) + 'px';
+      tooltip.style.top  = (e.clientY - canvas.getBoundingClientRect().top  - 10) + 'px';
+    } else { tooltip.style.display = 'none'; }
+  });
+  canvas.addEventListener('mouseup',    () => { dragging = null; });
+  canvas.addEventListener('mouseleave', () => { dragging = null; tooltip.style.display = 'none'; });
+})();
+
+let _activeType = 'all';
+
+function filterIOCs(type) {
+  _activeType = type;
+  document.querySelectorAll('.ioc-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.type === type);
+  });
+  applyFilters();
+}
+
+function searchIOCs() {
+  applyFilters();
+}
+
+function applyFilters() {
+  const q = (document.getElementById('ioc-search')?.value || '').toLowerCase();
+  let shown = 0, total = 0;
+  document.querySelectorAll('.ioc-row').forEach(row => {
+    total++;
+    const typeMatch  = _activeType === 'all' || row.dataset.type === _activeType;
+    const queryMatch = !q || row.dataset.value.includes(q);
+    const visible    = typeMatch && queryMatch;
+    row.style.display = visible ? '' : 'none';
+    if (visible) shown++;
+  });
+  const countEl = document.getElementById('ioc-count');
+  if (countEl) countEl.textContent = shown < total ? `${shown} of ${total} indicators` : '';
+}
+
+function copyIOC(btn, value) {
+  if (typeof copyText === 'function') {
+    copyText(value, 'IOC');
+  } else {
+    navigator.clipboard.writeText(value).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = orig, 2000);
+    });
+  }
+}
+</script>
+{% endblock %}

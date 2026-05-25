@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block main %}
+<!-- Topbar -->
+<header class="topbar">
+  <span class="topbar-title">
+    YARA Rules
+    {% if rule_count %}
+      <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+        {{ rule_count }} rule{{ 's' if rule_count != 1 else '' }}
+        {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+      </span>
+    {% endif %}
+  </span>
+  {% if rule_count %}
+  <a href="/yara/download" class="btn btn-primary btn-sm">Download .yar ↓</a>
+  {% endif %}
+</header>
+
+<div class="content">
+  {% if not rule_count %}
+  <!-- Empty state -->
+  <div class="upload-zone"
+       onclick="document.getElementById('file-input').click()"
+       style="cursor:pointer"
+       ondragover="event.preventDefault(); this.classList.add('drag-over')"
+       ondragleave="this.classList.remove('drag-over')"
+       ondrop="event.preventDefault(); this.classList.remove('drag-over'); window.location='/'">
+    <div class="uz-title">No analysis loaded</div>
+    <p style="font-size:12px;margin-top:.5rem">
+      Go to <a href="/" style="color:var(--purple-text);text-decoration:underline">Dashboard</a>
+      and upload a log file first.
+    </p>
+  </div>
+  <div class="empty-state">
+    <div style="font-size:28px;margin-bottom:.5rem">⬆</div>
+    <p>YARA rules are generated automatically after analysis.</p>
+  </div>
+
+  {% else %}
+  <!-- YARA viewer -->
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-bottom:0.5px solid var(--border);background:var(--bg);">
+      <span style="font-size:12px;font-weight:500;color:var(--text2);">dissect_rules.yar</span>
+      <a href="/yara/download" class="btn btn-sm" style="font-size:11px;">Download ↓</a>
+    </div>
+    <pre class="code-block" style="border:none;border-radius:0;margin:0;max-height:72vh;overflow-y:auto;"><code class="language-c">{{ yara_text }}</code></pre>
+  </div>
+
+  <div style="margin-top:1rem;display:flex;justify-content:flex-end;">
+    <a href="/yara/download" class="btn btn-primary">Download YARA rules ↓</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

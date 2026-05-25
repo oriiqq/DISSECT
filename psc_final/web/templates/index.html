@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block main %}
+<!-- Topbar -->
+<header class="topbar">
+  <span class="topbar-title" id="page-title">
+    {% if filename %}Analysis: <span class="mono">{{ filename }}</span>
+    {% else %}No analysis loaded{% endif %}
+  </span>
+  <form id="upload-form" class="upload-form">
+    <label class="file-label" for="file-input">
+      <span id="upload-spinner" style="display:none;margin-right:4px">↻</span>
+      <span id="upload-label-text">Upload EVTX / JSON</span>
+    </label>
+    <input type="file" id="file-input" name="file"
+           accept=".evtx,.json,.jsonl,.ndjson"
+           onchange="doUpload(this)">
+  </form>
+  {% if sessions %}
+  <button class="btn btn-danger btn-sm"
+          hx-delete="/state"
+          hx-target="#dashboard"
+          hx-swap="innerHTML"
+          hx-confirm="Clear all analysis data?">Clear</button>
+  {% endif %}
+</header>
+
+<!-- Sub-tab nav: Sessions | Charts -->
+<div class="subtab-nav" id="dash-subtab-nav">
+  <button class="subtab-btn st-active" onclick="switchDashTab('sessions', this)">Sessions</button>
+  <button class="subtab-btn"
+          onclick="switchDashTab('charts', this)"
+          hx-get="/analytics/fragment"
+          hx-target="#tab-charts"
+          hx-trigger="click once"
+          hx-swap="innerHTML">
+    Charts
+  </button>
+</div>
+
+<!-- Sessions tab -->
+<div id="tab-sessions" class="tab-pane st-visible">
+  <div id="dashboard">{% include "partials/dashboard.html" %}</div>
+</div>
+
+<!-- Charts tab (htmx lazy-loaded) -->
+<div id="tab-charts" class="tab-pane">
+  <div style="padding:3rem;text-align:center;color:var(--text3);font-size:13px;">Loading charts…</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchDashTab(name, btn) {
+  document.getElementById('tab-sessions').classList.toggle('st-visible', name === 'sessions');
+  document.getElementById('tab-charts').classList.toggle('st-visible',  name === 'charts');
+  document.querySelectorAll('#dash-subtab-nav .subtab-btn').forEach(b => b.classList.remove('st-active'));
+  btn.classList.add('st-active');
+  if (name === 'charts') setTimeout(() => window.dispatchEvent(new Event('resize')), 80);
+}
+
+function doUpload(source) {
+  const file = source instanceof File ? source : source.files[0];
+  if (!file) return;
+
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+
+  const lblText  = document.getElementById('upload-label-text');
+  lblText.textContent = 'Analysing…';
+
+  const dashboard = document.getElementById('dashboard');
+  if (dashboard) {
+    dashboard.innerHTML = `
+      <div style="padding:6rem 2rem;text-align:center;animation:fadeInUp .3s var(--ease);">
+        <div style="width:44px;height:44px;border:3px solid var(--border);
+                    border-top-color:var(--purple);border-radius:50%;
+                    margin:0 auto 1.75rem;animation:spin .75s linear infinite;"></div>
+        <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:.5rem;">
+          Analysing <span class="mono" style="color:var(--purple-text)">${file.name}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text3);line-height:1.7;">
+          Parsing events &nbsp;·&nbsp; running detection rules &nbsp;·&nbsp; scoring sessions &nbsp;·&nbsp; extracting IOCs
+        </div>
+      </div>`;
+  }
+
+  fetch('/upload', { method: 'POST', body: fd })
+    .then(r => r.text())
+    .then(html => {
+      dashboard.innerHTML = html;
+      document.getElementById('page-title').innerHTML =
+        'Analysis: <span class="mono">' + file.name + '</span>';
+      htmx.process(dashboard);
+      if (typeof staggerIn === 'function') {
+        staggerIn('.stat-card',    40);
+        staggerIn('.session-row',  18);
+        staggerIn('.campaign-card', 30);
+      }
+    })
+    .catch(() => {
+      dashboard.innerHTML =
+        '<div class="error-banner">Upload failed — check the server log.</div>';
+    })
+    .finally(() => {
+      lblText.textContent = 'Upload EVTX / JSON';
+    });
+}
+</script>
+{% endblock %}

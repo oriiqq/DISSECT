@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    Threat Intelligence
+    {% if total_hits %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {{ total_hits }} match{{ 'es' if total_hits != 1 else '' }} across abuse.ch feeds
+      {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+  {% if total_hits %}
+  <div style="display:flex;gap:8px;align-items:center;">
+    {% for src, cnt in hit_counts.items() %}
+    <span class="badge tier-p2" style="font-size:10px;">{{ src }}: {{ cnt }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</header>
+
+<div class="content">
+{% if not ti_hits %}
+<div class="empty-state">
+  <svg style="width:40px;height:40px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+  </svg>
+  <p>No threat intelligence matches yet.</p>
+  <p style="margin-top:.25rem;font-size:12px;">
+    Upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a>,
+    then visit this page — IOCs will be checked against ThreatFox, URLhaus, and MalwareBazaar.
+  </p>
+  <p style="margin-top:.25rem;font-size:12px;color:var(--text3);">
+    Lookups require an internet connection. Results are cached for the session.
+  </p>
+</div>
+
+{% else %}
+
+<!-- Source badges row -->
+<div style="display:flex;gap:12px;margin-bottom:1.25rem;flex-wrap:wrap;">
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.6rem 1rem;min-width:120px;">
+    <div style="font-size:20px;font-weight:700;color:var(--red);">{{ total_hits }}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px;">Total TI Matches</div>
+  </div>
+  {% for src, cnt in hit_counts.items() %}
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.6rem 1rem;min-width:120px;">
+    <div style="font-size:20px;font-weight:700;color:var(--accent);">{{ cnt }}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px;">{{ src }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Filter tabs -->
+<div class="seg-tabs" style="margin-bottom:1.25rem;">
+  {% set sources = ti_hits | map(attribute='source') | unique | list %}
+  <button class="seg-tab ti-tab active" data-src="all" onclick="filterTI('all', this)">
+    All&thinsp;<span style="opacity:.55;font-weight:400;">{{ total_hits }}</span>
+  </button>
+  {% for src in sources %}
+  <button class="seg-tab ti-tab" data-src="{{ src }}" onclick="filterTI('{{ src }}', this)">
+    {{ src }}&thinsp;<span style="opacity:.55;font-weight:400;">{{ hit_counts[src] }}</span>
+  </button>
+  {% endfor %}
+</div>
+
+<!-- TI hits table -->
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:72px;">Source</th>
+        <th style="width:68px;">Type</th>
+        <th>Indicator</th>
+        <th style="width:160px;">Malware</th>
+        <th style="width:60px;">Conf.</th>
+        <th style="width:130px;">First Seen</th>
+        <th style="width:56px;"></th>
+      </tr>
+    </thead>
+    <tbody id="ti-tbody">
+      {% for h in ti_hits %}
+      <tr class="ti-row" data-src="{{ h.source }}">
+        <td>
+          <span class="badge
+            {%- if h.source == 'threatfox' %} tier-p1
+            {%- elif h.source == 'urlhaus' %} tier-p2
+            {%- else %} tier-p3{%- endif %}"
+            style="font-size:10px;">{{ h.source }}</span>
+        </td>
+        <td>
+          <span class="badge tier-info" style="font-size:10px;">{{ h.ioc_type }}</span>
+        </td>
+        <td class="mono" style="font-size:11px;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+            title="{{ h.ioc_value }}">{{ h.ioc_value }}</td>
+        <td style="font-size:12px;font-weight:500;">
+          {{ h.malware_name or '—' }}
+          {% if h.threat_type %}
+          <span style="font-size:10px;color:var(--text3);display:block;">{{ h.threat_type }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if h.confidence >= 80 %}
+            <span style="color:var(--red);font-weight:600;">{{ h.confidence }}%</span>
+          {% elif h.confidence >= 50 %}
+            <span style="color:var(--amber);font-weight:600;">{{ h.confidence }}%</span>
+          {% else %}
+            <span style="color:var(--text3);">{{ h.confidence }}%</span>
+          {% endif %}
+        </td>
+        <td style="font-size:11px;color:var(--text3);">{{ h.first_seen[:10] if h.first_seen else '—' }}</td>
+        <td>
+          <button class="btn btn-sm" onclick="copyText({{ h.ioc_value | tojson }}, 'IOC')"
+                  style="font-size:10px;padding:2px 8px;">Copy</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Tags summary -->
+{% set all_tags = [] %}
+{% for h in ti_hits %}{% for t in h.tags %}{% if t %}{% set _ = all_tags.append(t) %}{% endif %}{% endfor %}{% endfor %}
+{% if all_tags %}
+<div style="margin-top:1rem;">
+  <h4 style="margin-bottom:.5rem;">Associated Tags</h4>
+  <div>
+    {% for tag in all_tags | unique | sort %}
+    <span class="tech-tag" style="font-size:11px;padding:3px 8px;margin:2px;">{{ tag }}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterTI(src, btn) {
+  document.querySelectorAll('.ti-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.ti-row').forEach(row => {
+    row.style.display = (src === 'all' || row.dataset.src === src) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

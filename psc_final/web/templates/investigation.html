@@ -1,0 +1,523 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    Investigation
+    {% if move_count or total_sessions %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {% if move_count %}{{ move_count }} lateral hop{{ 's' if move_count != 1 else '' }}{% endif %}
+      {% if move_count and total_sessions %} · {% endif %}
+      {% if total_sessions %}{{ total_sessions }} timeline event{{ 's' if total_sessions != 1 else '' }}{% endif %}
+      {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+  {% if total_sessions %}
+  <button onclick="window.print()" class="btn btn-sm">Print Timeline</button>
+  {% endif %}
+</header>
+
+<!-- Sub-tab nav -->
+<div class="subtab-nav">
+  <button class="subtab-btn st-active" onclick="switchInvTab('lateral', this)">Lateral Movement</button>
+  <button class="subtab-btn"           onclick="switchInvTab('timeline', this)">Timeline</button>
+  <button class="subtab-btn"           onclick="switchInvTab('summary', this)">Executive Summary</button>
+</div>
+
+{# ═══════════════════════════════════════════════════════ LATERAL MOVEMENT TAB #}
+<div id="tab-lateral" class="tab-pane st-visible">
+<div class="content">
+{% if not edges %}
+<div class="empty-state">
+  <div style="font-size:28px;margin-bottom:.5rem">🌐</div>
+  <p>No lateral movement detected.</p>
+  <p style="margin-top:.25rem;font-size:12px;">
+    Lateral movement is inferred when sessions on different hosts share WinRM / WMI / SMB techniques within a 30-minute window.
+  </p>
+</div>
+{% else %}
+<div style="display:flex;gap:12px;margin-bottom:1.25rem;flex-wrap:wrap;">
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.6rem 1rem;min-width:110px;">
+    <div style="font-size:22px;font-weight:700;color:var(--accent);">{{ host_count }}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px;">Hosts</div>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.6rem 1rem;min-width:110px;">
+    <div style="font-size:22px;font-weight:700;color:var(--red);">{{ move_count }}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px;">Movement Hops</div>
+  </div>
+  {% set tech_set = edges | map(attribute='technique') | unique | list %}
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.6rem 1rem;min-width:110px;">
+    <div style="font-size:22px;font-weight:700;color:var(--amber);">{{ tech_set | length }}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px;">Techniques</div>
+  </div>
+</div>
+
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);
+            margin-bottom:1.25rem;position:relative;overflow:hidden;">
+  <div style="padding:.6rem 1rem .4rem;border-bottom:0.5px solid var(--border);display:flex;align-items:center;gap:8px;">
+    <span style="font-size:12px;font-weight:600;">Host Topology Graph</span>
+    <span style="font-size:11px;color:var(--text3);">drag to rearrange · hover for details</span>
+    <div style="margin-left:auto;display:flex;gap:12px;font-size:11px;color:var(--text3);">
+      <span><svg style="width:10px;height:10px;display:inline;vertical-align:middle;" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--red)"/></svg> P1</span>
+      <span><svg style="width:10px;height:10px;display:inline;vertical-align:middle;" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--amber)"/></svg> P2</span>
+      <span><svg style="width:10px;height:10px;display:inline;vertical-align:middle;" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--teal)"/></svg> P3</span>
+      <span><svg style="width:10px;height:10px;display:inline;vertical-align:middle;" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--text3)"/></svg> Clean</span>
+    </div>
+  </div>
+  <canvas id="lat-graph" style="width:100%;display:block;" height="380"></canvas>
+  <div id="lat-tooltip" style="display:none;position:absolute;background:var(--card);border:0.5px solid var(--border);
+       border-radius:var(--radius);padding:6px 10px;font-size:11px;pointer-events:none;box-shadow:var(--shadow-sm);max-width:240px;"></div>
+</div>
+
+<h4 style="margin-bottom:.75rem;">Detected Lateral Moves</h4>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Source Host</th><th>Target Host</th>
+        <th style="width:140px;">Technique</th><th style="width:90px;">MITRE ID</th><th style="width:80px;">Time</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in edges %}
+      <tr>
+        <td class="mono" style="font-size:12px;">{{ e.source }}</td>
+        <td class="mono" style="font-size:12px;"><span style="color:var(--red);margin-right:4px;">→</span>{{ e.target }}</td>
+        <td><span class="badge tier-p2" style="font-size:10px;">{{ e.evidence }}</span></td>
+        <td><code class="mono" style="font-size:11px;">{{ e.mitre_id }}</code></td>
+        <td style="font-size:11px;color:var(--text3);">{{ e.ts or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+</div>
+</div>
+
+{# ═══════════════════════════════════════════════════════ TIMELINE TAB #}
+<div id="tab-timeline" class="tab-pane">
+<div class="content">
+{% if not date_groups %}
+<div class="empty-state">
+  <svg style="width:40px;height:40px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+  </svg>
+  <p>No timeline data — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+</div>
+{% else %}
+{% if heatmap_cells %}
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.75rem 1rem;margin-bottom:1.25rem;">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:.6rem;">
+    <span style="font-size:11px;font-weight:600;color:var(--text);">Activity Heatmap</span>
+    <span style="font-size:10px;color:var(--text3);">hour of day × day of week &nbsp;·&nbsp; color = max severity</span>
+    <div style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:9px;color:var(--text3);">
+      <span>Low</span>
+      <div style="display:flex;gap:2px;">
+        <div style="width:10px;height:10px;border-radius:2px;background:var(--blue-bg);border:0.5px solid var(--blue);"></div>
+        <div style="width:10px;height:10px;border-radius:2px;background:var(--teal-bg);border:0.5px solid var(--teal);"></div>
+        <div style="width:10px;height:10px;border-radius:2px;background:var(--amber-bg);border:0.5px solid var(--amber);"></div>
+        <div style="width:10px;height:10px;border-radius:2px;background:var(--red-bg);border:0.5px solid var(--red);"></div>
+      </div>
+      <span>High</span>
+    </div>
+  </div>
+  <div style="display:flex;margin-left:28px;margin-bottom:2px;">
+    {% for h in range(24) %}<div style="flex:1;text-align:center;font-size:8px;color:var(--text3);">{% if h % 4 == 0 %}{{ '%02d'|format(h) }}{% endif %}</div>{% endfor %}
+  </div>
+  {% set days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+  {% for dow in range(7) %}
+  <div style="display:flex;align-items:center;gap:0;margin-bottom:2px;">
+    <div style="width:28px;font-size:9px;color:var(--text3);flex-shrink:0;">{{ days[dow] }}</div>
+    {% for hour in range(24) %}
+    {% set cell = heatmap_cells | selectattr('dow','eq',dow) | selectattr('hour','eq',hour) | list %}
+    {% if cell %}{% set c = cell[0] %}
+    {% if c.max_tier == 'P1_INCIDENT' %}{% set bg = 'var(--red-bg)' %}{% set bd = 'var(--red)' %}
+    {% elif c.max_tier == 'P2_ALERT' %}{% set bg = 'var(--amber-bg)' %}{% set bd = 'var(--amber)' %}
+    {% elif c.max_tier == 'P3_WARNING' %}{% set bg = 'var(--teal-bg)' %}{% set bd = 'var(--teal)' %}
+    {% else %}{% set bg = 'var(--blue-bg)' %}{% set bd = 'var(--blue)' %}{% endif %}
+    <div style="flex:1;height:14px;border-radius:2px;background:{{ bg }};border:0.5px solid {{ bd }};margin:0 1px;cursor:default;"
+         title="{{ days[dow] }} {{ '%02d'|format(hour) }}:00 — {{ c.count }} session{{ 's' if c.count != 1 else '' }}, max score {{ c.max_score | round | int }}"></div>
+    {% else %}
+    <div style="flex:1;height:14px;border-radius:2px;background:var(--bg2);margin:0 1px;"></div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="tl-legend">
+  <span class="tl-legend-title">Severity</span>
+  {% for label, color in [('P1 Incident','var(--red)'),('P2 Alert','var(--amber)'),('P3 Warning','var(--teal)'),('Info','var(--blue)')] %}
+  <span class="tl-legend-item"><span class="tl-legend-dot" style="background:{{ color }};"></span>{{ label }}</span>
+  {% endfor %}
+</div>
+
+<div class="tl-root">
+{% for group in date_groups %}
+<div class="tl-date-row{% if loop.first %} tl-date-first{% endif %}">
+  <div class="tl-date-gutter"></div>
+  <div class="tl-date-spine"></div>
+  <div class="tl-date-label-wrap">
+    <span class="tl-date-label">{{ group.label }}</span>
+    <div class="tl-date-rule"></div>
+    <span class="tl-date-count">{{ group.sessions | length }} event{{ 's' if group.sessions | length != 1 else '' }}</span>
+  </div>
+</div>
+{% for s in group.sessions %}
+{% if s.alert_tier == 'P1_INCIDENT' %}{% set tc = 'var(--red)' %}{% set tc_bg = 'var(--red-bg)' %}
+{% elif s.alert_tier == 'P2_ALERT' %}{% set tc = 'var(--amber)' %}{% set tc_bg = 'var(--amber-bg)' %}
+{% elif s.alert_tier == 'P3_WARNING' %}{% set tc = 'var(--teal)' %}{% set tc_bg = 'var(--teal-bg)' %}
+{% elif s.alert_tier == 'INFO' %}{% set tc = 'var(--blue)' %}{% set tc_bg = 'var(--blue-bg)' %}
+{% else %}{% set tc = 'var(--border)' %}{% set tc_bg = 'var(--bg2)' %}{% endif %}
+<div class="tl-event-row">
+  <div class="tl-gutter"><span class="tl-time">{{ s.start_time.strftime('%H:%M:%S') if s.start_time else '—' }}</span></div>
+  <div class="tl-spine-col">
+    <div class="tl-spine-top"></div>
+    <div class="tl-node" style="background:{{ tc }};box-shadow:0 0 0 3px {{ tc_bg }};"></div>
+    <div class="tl-spine-bottom"></div>
+  </div>
+  <div class="tl-card" style="border-left-color:{{ tc }};" onclick="toggleSession('{{ s.session_id }}')" id="card-{{ s.session_id }}">
+    <div class="tl-card-header">
+      <span class="badge {{ tier_cls(s.alert_tier) }}" style="flex-shrink:0;">{{ s.alert_tier.replace('_',' ') }}</span>
+      <span class="tl-hostname">{{ s.host_id }}</span>
+      <span class="tl-score" style="color:{{ tc }};">{{ s.weighted_score | round | int }}</span>
+    </div>
+    {% if s.technique_set %}<div class="tl-techniques">{% for t in s.technique_set | sort %}<span class="tech-tag">{{ t }}</span>{% endfor %}</div>{% endif %}
+    <div class="tl-meta">
+      <span>PID&thinsp;{{ s.process_id }}</span><span class="tl-meta-sep">·</span>
+      <span>{{ s.blocks | length }} block{{ 's' if s.blocks | length != 1 else '' }}</span>
+      {% if s.duration_seconds > 0 %}<span class="tl-meta-sep">·</span>
+      <span>{%- if s.duration_seconds < 60 %}{{ s.duration_seconds | int }}s
+            {%- elif s.duration_seconds < 3600 %}{{ (s.duration_seconds / 60) | int }}m&thinsp;{{ (s.duration_seconds % 60) | int }}s
+            {%- else %}{{ (s.duration_seconds / 3600) | int }}h&thinsp;{{ ((s.duration_seconds % 3600) / 60) | int }}m{%- endif %}</span>{% endif %}
+      <span class="tl-meta-sep">·</span><span>{{ s.tempo.value.replace('_',' ') }}</span>
+      {% if s.iocs %}<span class="tl-meta-sep">·</span><span>{{ s.iocs | length }} IOC{{ 's' if s.iocs | length != 1 else '' }}</span>{% endif %}
+      {% if s.campaign_id %}<span class="tl-meta-sep">·</span><span style="color:var(--purple-text);">campaign {{ s.campaign_id[:8] }}</span>{% endif %}
+      <span class="tl-expand-hint" id="hint-{{ s.session_id }}">↓ expand</span>
+    </div>
+  </div>
+</div>
+<div class="tl-detail-wrap" id="detail-{{ s.session_id }}" style="display:none;">
+  <div class="tl-detail-gutter"></div><div class="tl-detail-spine"></div>
+  <div class="tl-detail-body" id="detail-body-{{ s.session_id }}"><div class="tl-detail-loading">Loading…</div></div>
+</div>
+{% endfor %}
+{% endfor %}
+<div class="tl-cap-row">
+  <div class="tl-gutter"></div>
+  <div class="tl-spine-col"><div class="tl-spine-top" style="min-height:16px;"></div><div class="tl-cap"></div></div>
+  <div style="flex:1;"></div>
+</div>
+</div>
+{% endif %}
+</div>
+</div>
+
+{# ═══════════════════════════════════════════════════════ SUMMARY TAB #}
+<div id="tab-summary" class="tab-pane">
+<div class="content">
+{% if not has_data %}
+<div class="empty-state">
+  <svg style="width:40px;height:40px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+    <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+    <line x1="7" y1="15" x2="7" y2="17"/><line x1="12" y1="13" x2="12" y2="17"/><line x1="17" y1="11" x2="17" y2="17"/>
+  </svg>
+  <p>No analysis loaded — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+</div>
+{% else %}
+<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-bottom:1rem;">
+  <a href="/navigator/download" class="btn btn-sm">ATT&CK Navigator ↓</a>
+  <a href="/report/download"    class="btn btn-sm">Full Report ↓</a>
+  <button onclick="window.print()" class="btn btn-sm btn-primary">Print / PDF</button>
+</div>
+
+<div style="background:{{ risk_bg }};border:0.5px solid {{ risk_color }};border-radius:var(--radius-lg);
+            padding:1.25rem 1.5rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:1.25rem;">
+  <div style="flex-shrink:0;">
+    <div style="font-size:10px;font-weight:500;color:{{ risk_color }};text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px;">Overall Risk</div>
+    <div style="font-size:26px;font-weight:700;color:{{ risk_color }};line-height:1;">{{ risk_level }}</div>
+  </div>
+  <div style="flex:1;padding-left:1.25rem;border-left:1px solid {{ risk_color }};opacity:.9;font-size:13px;color:{{ risk_color }};">
+    {% if risk_level == 'CRITICAL' %}Active incident indicators detected. Immediate response required. {{ tier_counts.get('P1_INCIDENT', 0) }} P1 session(s) contain confirmed attack TTPs across {{ unique_hosts }} host(s).
+    {% elif risk_level == 'HIGH' %}Alert-level activity detected. {{ tier_counts.get('P2_ALERT', 0) }} session(s) require analyst review.
+    {% elif risk_level == 'MEDIUM' %}Warning-level activity detected. {{ tier_counts.get('P3_WARNING', 0) }} session(s) scored above detection threshold.
+    {% else %}No significant threats detected. All {{ stats.total }} session(s) scored below alert threshold.
+    {% endif %}
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:1.5rem;">
+  <div class="stat-card p1"><div class="stat-label">P1 Incidents</div><div class="stat-value">{{ tier_counts.get('P1_INCIDENT', 0) }}</div></div>
+  <div class="stat-card p2"><div class="stat-label">P2 Alerts</div><div class="stat-value">{{ tier_counts.get('P2_ALERT', 0) }}</div></div>
+  <div class="stat-card p3"><div class="stat-label">P3 Warnings</div><div class="stat-value">{{ tier_counts.get('P3_WARNING', 0) }}</div></div>
+  <div class="stat-card"><div class="stat-label">Sessions</div><div class="stat-value">{{ stats.total }}</div></div>
+  <div class="stat-card"><div class="stat-label">ATT&CK TTPs</div><div class="stat-value">{{ mitre_counts | length }}</div></div>
+  <div class="stat-card"><div class="stat-label">Unique IOCs</div><div class="stat-value">{{ unique_iocs }}</div></div>
+</div>
+
+{% if top_sessions %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header"><span class="section-title">Top Threats</span><a href="/" style="font-size:11px;color:var(--purple-text);">View all on Dashboard →</a></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Tier</th><th>Score</th><th>Host</th><th>Techniques</th><th>IOCs</th><th>Time</th></tr></thead>
+    <tbody>
+      {% for s in top_sessions %}
+      <tr>
+        <td><span class="badge {{ tier_cls(s.alert_tier) }}">{{ s.alert_tier }}</span></td>
+        <td><span class="score">{{ s.weighted_score | round | int }}</span></td>
+        <td class="mono" style="font-size:11px;">{{ s.host_id[:36] }}</td>
+        <td>{% for t in s.technique_set | sort %}<span class="tech-tag">{{ t }}</span>{% endfor %}</td>
+        <td class="muted">{{ s.iocs | length }}</td>
+        <td style="font-size:11px;color:var(--text3);">{{ s.start_time.strftime('%Y-%m-%d %H:%M') if s.start_time else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endif %}
+
+{% if tactic_breakdown %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header">
+    <span class="section-title">Kill-Chain Coverage</span>
+    <span style="font-size:11px;color:var(--text3);">{{ tactic_breakdown | selectattr('active') | list | length }} of {{ tactic_breakdown | length }} stages covered</span>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1rem;overflow-x:auto;">
+    <div style="display:flex;gap:0;min-width:540px;">
+      {% set stage_colors = {'Execution':('var(--blue)','var(--blue-bg)','var(--blue-text)'),'Defense Evasion':('var(--amber)','var(--amber-bg)','var(--amber-text)'),'Persistence':('var(--teal)','var(--teal-bg)','var(--teal-text)'),'Priv. Escalation':('var(--purple)','var(--purple-bg)','var(--purple-text)'),'Cred. Access':('var(--red)','var(--red-bg)','var(--red-text)'),'Lateral Movement':('var(--red)','var(--red-bg)','var(--red-text)'),'Command & Control':('var(--red)','var(--red-bg)','var(--red-text)')} %}
+      {% for stage in tactic_breakdown %}
+      {% set colors = stage_colors.get(stage.name, ('var(--border)', 'var(--bg2)', 'var(--text3)')) %}
+      <div style="flex:1;min-width:0;position:relative;">
+        {% if not loop.last %}<div style="position:absolute;right:-1px;top:50%;transform:translateY(-50%);width:0;height:0;z-index:2;border-top:8px solid transparent;border-bottom:8px solid transparent;border-left:8px solid {% if stage.active %}{{ colors[0] }}{% else %}var(--border){% endif %};"></div>{% endif %}
+        <div style="margin-right:{% if not loop.last %}8px{% else %}0{% endif %};background:{% if stage.active %}{{ colors[1] }}{% else %}var(--bg2){% endif %};border:1px solid {% if stage.active %}{{ colors[0] }}{% else %}var(--border){% endif %};border-radius:{% if loop.first %}var(--radius) 0 0 var(--radius){% elif loop.last %}0 var(--radius) var(--radius) 0{% else %}0{% endif %};padding:.5rem .6rem;text-align:center;">
+          <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:{% if stage.active %}{{ colors[2] }}{% else %}var(--text3){% endif %};margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ stage.name }}</div>
+          {% if stage.active %}<div style="font-size:16px;font-weight:700;color:{{ colors[0] }};">{{ stage.total }}</div><div style="font-size:8px;color:{{ colors[2] }};opacity:.7;">hit{{ 's' if stage.total != 1 else '' }}</div>
+          {% else %}<div style="font-size:16px;color:var(--border);">—</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% set active_stages = tactic_breakdown | selectattr('active') | list %}
+    {% if active_stages %}
+    <div style="margin-top:.75rem;padding-top:.75rem;border-top:0.5px solid var(--border);display:flex;flex-wrap:wrap;gap:4px;">
+      {% for stage in active_stages %}{% set colors = stage_colors.get(stage.name, ('var(--border)','var(--bg2)','var(--text3)')) %}
+      {% for mid, cnt in stage.hits.items() %}
+      <span style="display:inline-flex;align-items:center;gap:3px;background:{{ colors[1] }};color:{{ colors[2] }};font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:4px;font-weight:500;border:0.5px solid {{ colors[0] }};">
+        {{ mid }}<span style="background:{{ colors[0] }};color:{{ colors[1] }};border-radius:2px;padding:0 3px;font-size:8px;font-weight:700;">{{ cnt }}</span>
+      </span>
+      {% endfor %}{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if mitre_counts %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header"><span class="section-title">ATT&CK Techniques Detected</span><a href="/navigator/download" style="font-size:11px;color:var(--purple-text);">Navigator export ↓</a></div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1rem;display:flex;flex-wrap:wrap;gap:6px;">
+    {% for mid, cnt in mitre_counts.items() %}
+    <a href="/?search={{ mid }}" style="display:inline-flex;align-items:center;gap:4px;background:var(--purple-bg);color:var(--purple-text);font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:4px;font-weight:500;text-decoration:none;" onmouseover="this.style.filter='brightness(1.15)'" onmouseout="this.style.filter=''">
+      {{ mid }}<span style="background:var(--purple-text);color:var(--purple-bg);border-radius:3px;padding:0 4px;font-size:9px;font-weight:700;">{{ cnt }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if campaigns %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header"><span class="section-title">Cross-host Campaigns</span></div>
+  {% for c in campaigns %}
+  <div class="campaign-card">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span class="badge {% if c.is_confirmed %}tier-p1{% else %}tier-p2{% endif %}">{{ 'Confirmed' if c.is_confirmed else 'Tentative' }}</span>
+      <span style="font-size:13px;font-weight:500;">Campaign <code style="font-size:12px">{{ c.campaign_id }}</code></span>
+      <span style="margin-left:auto;font-size:11px;color:var(--text3);">{{ c.sessions | length }} sessions &nbsp;·&nbsp; {{ c.host_ids | length }} hosts &nbsp;·&nbsp; peak sev {{ c.peak_severity }}</span>
+    </div>
+    {% if c.first_seen and c.last_seen %}<div style="font-size:11px;color:var(--text3);">{{ c.first_seen.strftime('%Y-%m-%d %H:%M') }} → {{ c.last_seen.strftime('%Y-%m-%d %H:%M') }}</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.tl-legend        { display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:1.5rem; }
+.tl-legend-title  { font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3); }
+.tl-legend-item   { display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2); }
+.tl-legend-dot    { width:9px;height:9px;border-radius:50%;flex-shrink:0; }
+.tl-root          { max-width:860px; }
+.tl-gutter        { width:72px;flex-shrink:0; }
+.tl-spine-col     { width:28px;flex-shrink:0;display:flex;flex-direction:column;align-items:center; }
+.tl-spine-top     { width:1.5px;min-height:10px;background:var(--border);flex-shrink:0; }
+.tl-spine-bottom  { width:1.5px;flex:1;min-height:10px;background:var(--border);flex-shrink:0; }
+.tl-node          { width:11px;height:11px;border-radius:50%;flex-shrink:0;z-index:1; }
+.tl-cap           { width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0; }
+.tl-date-row      { display:flex;align-items:stretch;min-height:40px;margin-top:2rem; }
+.tl-date-first    { margin-top:0; }
+.tl-date-spine    { width:28px;flex-shrink:0;display:flex;flex-direction:column;align-items:center; }
+.tl-date-spine::before { content:'';width:1.5px;flex:1;background:var(--border); }
+.tl-date-gutter   { width:72px;flex-shrink:0; }
+.tl-date-label-wrap { flex:1;display:flex;align-items:center;gap:10px;padding:0 0 0 12px; }
+.tl-date-label    { font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);white-space:nowrap; }
+.tl-date-rule     { flex:1;height:0.5px;background:var(--border); }
+.tl-date-count    { font-size:10px;color:var(--text3);white-space:nowrap; }
+.tl-event-row     { display:flex;align-items:flex-start;margin-bottom:3px; }
+.tl-time          { display:block;font-family:var(--mono);font-size:10.5px;color:var(--text3);text-align:right;padding-top:10px;padding-right:2px;line-height:1; }
+.tl-card          { flex:1;background:var(--card);border:0.5px solid var(--border);border-left-width:3px;border-radius:0 var(--radius) var(--radius) 0;padding:.55rem .9rem;cursor:pointer;margin-left:10px;transition:background .1s;margin-bottom:2px; }
+.tl-card:hover    { background:var(--bg); }
+.tl-card-header   { display:flex;align-items:center;gap:8px;margin-bottom:5px; }
+.tl-hostname      { font-family:var(--mono);font-size:12px;font-weight:500;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.tl-score         { font-size:15px;font-weight:700;flex-shrink:0; }
+.tl-techniques    { margin-bottom:5px;line-height:1.6; }
+.tl-meta          { font-size:10.5px;color:var(--text3);display:flex;align-items:center;flex-wrap:wrap;gap:2px; }
+.tl-meta-sep      { opacity:.4;margin:0 1px; }
+.tl-expand-hint   { margin-left:auto;font-size:10px;color:var(--text3);opacity:.5;flex-shrink:0;transition:opacity .1s; }
+.tl-card:hover .tl-expand-hint { opacity:1; }
+.tl-detail-wrap   { display:flex;align-items:stretch;margin-bottom:4px; }
+.tl-detail-gutter { width:72px;flex-shrink:0; }
+.tl-detail-spine  { width:28px;flex-shrink:0;display:flex;justify-content:center; }
+.tl-detail-spine::before { content:'';width:1.5px;background:var(--border); }
+.tl-detail-body   { flex:1;margin-left:10px;border-left:3px solid var(--border2);border-radius:0 var(--radius-lg) var(--radius-lg) 0;background:var(--bg);padding:0;overflow:hidden; }
+.tl-detail-loading { padding:.75rem 1rem;font-size:12px;color:var(--text3); }
+.tl-cap-row       { display:flex;align-items:flex-start; }
+@media print { .sidebar,.topbar{display:none!important} .shell{display:block} .main{width:100%;overflow:visible} .tl-card{break-inside:avoid} }
+</style>
+
+<script>
+function switchInvTab(name, btn) {
+  ['lateral','timeline','summary'].forEach(function(t) {
+    var p = document.getElementById('tab-' + t);
+    if (p) p.classList.remove('st-visible');
+  });
+  var pane = document.getElementById('tab-' + name);
+  if (pane) pane.classList.add('st-visible');
+  btn.closest('.subtab-nav').querySelectorAll('.subtab-btn').forEach(function(b) { b.classList.remove('st-active'); });
+  btn.classList.add('st-active');
+}
+
+{% if edges %}
+/* ── Lateral movement graph ── */
+const NODES = {{ nodes | tojson }};
+const EDGES = {{ edges | tojson }};
+const TIER_COLORS = { P1_INCIDENT:'#e5343a', P2_ALERT:'#d97706', P3_WARNING:'#059669', INFO:'#2563eb', CLEAN:'#8e93ab' };
+const latCanvas = document.getElementById('lat-graph');
+const latCtx = latCanvas.getContext('2d');
+const latTooltip = document.getElementById('lat-tooltip');
+function latResize() {
+  var dpr = window.devicePixelRatio || 1, rect = latCanvas.parentElement.getBoundingClientRect();
+  latCanvas.style.width = rect.width + 'px';
+  latCanvas.width = rect.width * dpr; latCanvas.height = 380 * dpr;
+  latCtx.scale(dpr, dpr);
+}
+latResize();
+window.addEventListener('resize', function() { latResize(); });
+const latW = function() { return parseInt(latCanvas.style.width); }, latH = 380;
+var latPos = {};
+NODES.forEach(function(n, i) {
+  var angle = (2 * Math.PI * i) / NODES.length, cx = latW()/2, cy = latH/2, r = Math.min(cx,cy)*0.62;
+  latPos[n.id] = { x: cx + r*Math.cos(angle), y: cy + r*Math.sin(angle), vx:0, vy:0 };
+});
+function latForces() {
+  var nodes = NODES.map(function(n) { return Object.assign({}, n, latPos[n.id]); });
+  var REPEL=2200, SPRING=0.08, DAMP=0.82, IDEAL=160;
+  for (var i=0;i<nodes.length;i++) for (var j=i+1;j<nodes.length;j++) {
+    var dx=nodes[j].x-nodes[i].x, dy=nodes[j].y-nodes[i].y, dist=Math.sqrt(dx*dx+dy*dy)||1, f=REPEL/(dist*dist);
+    nodes[i].vx-=dx/dist*f; nodes[i].vy-=dy/dist*f; nodes[j].vx+=dx/dist*f; nodes[j].vy+=dy/dist*f;
+  }
+  EDGES.forEach(function(e) {
+    var a=nodes.find(function(n){return n.id===e.source;}), b=nodes.find(function(n){return n.id===e.target;});
+    if (!a||!b) return;
+    var dx=b.x-a.x, dy=b.y-a.y, dist=Math.sqrt(dx*dx+dy*dy)||1, stretch=(dist-IDEAL)*SPRING, fx=dx/dist*stretch, fy=dy/dist*stretch;
+    a.vx+=fx; a.vy+=fy; b.vx-=fx; b.vy-=fy;
+  });
+  nodes.forEach(function(n) {
+    n.vx*=DAMP; n.vy*=DAMP;
+    n.x=Math.max(50,Math.min(latW()-50,n.x+n.vx)); n.y=Math.max(40,Math.min(latH-40,n.y+n.vy));
+    latPos[n.id]={x:n.x,y:n.y,vx:n.vx,vy:n.vy};
+  });
+}
+function latDraw() {
+  var dpr=window.devicePixelRatio||1;
+  latCtx.clearRect(0,0,latW()*dpr,latH*dpr);
+  var isDark=document.documentElement.getAttribute('data-theme')==='dark';
+  EDGES.forEach(function(e) {
+    var a=latPos[e.source], b=latPos[e.target]; if (!a||!b) return;
+    var dx=b.x-a.x, dy=b.y-a.y, dist=Math.sqrt(dx*dx+dy*dy)||1;
+    latCtx.beginPath(); latCtx.moveTo(a.x,a.y); latCtx.lineTo(b.x,b.y);
+    latCtx.strokeStyle='#e5343a'; latCtx.lineWidth=1.5; latCtx.setLineDash([4,3]); latCtx.globalAlpha=0.55; latCtx.stroke();
+    latCtx.setLineDash([]); latCtx.globalAlpha=1;
+    var as=8, nx=dx/dist, ny=dy/dist, r=18, tx=b.x-nx*r, ty=b.y-ny*r, px=-ny, py=nx;
+    latCtx.beginPath(); latCtx.moveTo(tx,ty);
+    latCtx.lineTo(tx-nx*as+px*as*.5, ty-ny*as+py*as*.5);
+    latCtx.lineTo(tx-nx*as-px*as*.5, ty-ny*as-py*as*.5);
+    latCtx.closePath(); latCtx.fillStyle='#e5343a'; latCtx.globalAlpha=0.7; latCtx.fill(); latCtx.globalAlpha=1;
+    latCtx.font='10px -apple-system,sans-serif'; latCtx.fillStyle='#e5343a'; latCtx.globalAlpha=0.8;
+    latCtx.textAlign='center'; latCtx.fillText(e.evidence,(a.x+b.x)/2,(a.y+b.y)/2-5); latCtx.globalAlpha=1;
+  });
+  NODES.forEach(function(n) {
+    var p=latPos[n.id]; if (!p) return;
+    var color=TIER_COLORS[n.tier]||TIER_COLORS.CLEAN, r=18, lbl=n.id.length>12?n.id.slice(0,11)+'…':n.id;
+    if (n.tier==='P1_INCIDENT'||n.tier==='P2_ALERT') {
+      latCtx.beginPath(); latCtx.arc(p.x,p.y,r+6,0,Math.PI*2);
+      latCtx.fillStyle=color; latCtx.globalAlpha=0.12; latCtx.fill(); latCtx.globalAlpha=1;
+    }
+    latCtx.beginPath(); latCtx.arc(p.x,p.y,r,0,Math.PI*2);
+    latCtx.fillStyle=isDark?'#151b28':'#fff'; latCtx.fill();
+    latCtx.strokeStyle=color; latCtx.lineWidth=2.5; latCtx.stroke();
+    latCtx.font='bold 10px -apple-system,sans-serif'; latCtx.fillStyle=isDark?'#e6e9f4':'#0f1117';
+    latCtx.textAlign='center'; latCtx.textBaseline='middle'; latCtx.fillText(lbl,p.x,p.y+r+14); latCtx.textBaseline='alphabetic';
+  });
+}
+var _latSim=true, _latFrames=0;
+function latLoop() {
+  if (_latSim) { latForces(); if (++_latFrames>180) _latSim=false; }
+  latDraw(); if (_latSim) requestAnimationFrame(latLoop);
+}
+requestAnimationFrame(latLoop);
+var _latDrag=null, _latOff={x:0,y:0};
+function latGetNode(mx,my) {
+  return NODES.find(function(n){ var p=latPos[n.id]; if (!p) return false; var dx=p.x-mx,dy=p.y-my; return Math.sqrt(dx*dx+dy*dy)<=20; });
+}
+latCanvas.addEventListener('mousedown', function(e) {
+  var rect=latCanvas.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top, n=latGetNode(mx,my);
+  if (n) { _latDrag=n.id; var p=latPos[n.id]; _latOff={x:mx-p.x,y:my-p.y}; _latSim=false; }
+});
+latCanvas.addEventListener('mousemove', function(e) {
+  var rect=latCanvas.getBoundingClientRect(), mx=e.clientX-rect.left, my=e.clientY-rect.top;
+  if (_latDrag) { latPos[_latDrag].x=mx-_latOff.x; latPos[_latDrag].y=my-_latOff.y; latDraw(); return; }
+  var n=latGetNode(mx,my);
+  if (n) {
+    var hops=EDGES.filter(function(ed){return ed.source===n.id||ed.target===n.id;});
+    latTooltip.innerHTML='<strong>'+n.id+'</strong><br>Tier: '+n.tier+'<br>Hops: '+hops.length;
+    latTooltip.style.display='block'; latTooltip.style.left=(mx+14)+'px'; latTooltip.style.top=(my-8)+'px';
+  } else { latTooltip.style.display='none'; }
+});
+latCanvas.addEventListener('mouseup',    function() { _latDrag=null; });
+latCanvas.addEventListener('mouseleave', function() { _latDrag=null; latTooltip.style.display='none'; });
+document.addEventListener('theme-changed', function() { latDraw(); });
+{% endif %}
+
+/* ── Timeline expand/collapse ── */
+var _tlOpen = {};
+function toggleSession(id) {
+  var wrap=document.getElementById('detail-'+id), hint=document.getElementById('hint-'+id), body=document.getElementById('detail-body-'+id);
+  if (!wrap) return;
+  if (_tlOpen[id]) {
+    wrap.style.display='none'; if (hint) hint.textContent='↓ expand'; _tlOpen[id]=false;
+  } else {
+    wrap.style.display='flex'; if (hint) hint.textContent='↑ collapse'; _tlOpen[id]=true;
+    if (!body.dataset.loaded) { htmx.ajax('GET','/sessions/'+id,{target:'#detail-body-'+id,swap:'innerHTML'}); body.dataset.loaded='1'; }
+    setTimeout(function(){wrap.scrollIntoView({behavior:'smooth',block:'nearest'});},80);
+  }
+}
+</script>
+{% endblock %}

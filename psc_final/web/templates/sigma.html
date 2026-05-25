@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    Sigma Rules
+    {% if sigma_rules %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {{ sigma_rules|length }} rule{{ 's' if sigma_rules|length != 1 else '' }}
+      {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+  {% if sigma_rules %}
+  <a href="/sigma/download" class="btn btn-primary btn-sm">Download .yml ↓</a>
+  {% endif %}
+</header>
+
+<div class="content">
+{% if not sigma_rules %}
+<div class="empty-state">
+  <div style="font-size:28px;margin-bottom:.5rem">📋</div>
+  <p>No Sigma rules — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+  <p style="margin-top:.25rem;font-size:12px">Rules are generated for sessions scoring ≥ 40.</p>
+</div>
+
+{% else %}
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+  <span style="font-size:12px;color:var(--text3);">
+    YAML format · ready for Sigma CLI conversion · compatible with all major SIEM backends
+  </span>
+  <a href="/sigma/download" class="btn btn-primary btn-sm">Download all rules ↓</a>
+</div>
+
+{% for rule in sigma_rules %}
+{% set lev_cls = {'critical':'sev-critical','high':'sev-high','medium':'sev-medium','low':'sev-low'}.get(rule.level, 'sev-low') %}
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:10px;overflow:hidden;">
+  <div style="display:flex;align-items:center;gap:8px;padding:.6rem 1rem;background:var(--bg);border-bottom:0.5px solid var(--border);">
+    <span class="badge {{ lev_cls }}">{{ rule.level }}</span>
+    <span style="font-size:13px;font-weight:500;">{{ rule.title }}</span>
+    {% if rule.mitre_id %}
+    <span class="ioc-chip">{{ rule.mitre_id }}</span>
+    {% endif %}
+    <span class="ioc-chip" style="margin-left:auto;">{{ rule.technique_id }}</span>
+    <button class="btn btn-sm" onclick="copySigma(this)" style="font-size:10px;padding:2px 8px;">Copy</button>
+  </div>
+  <pre class="code-block" style="border:none;border-radius:0;margin:0;max-height:260px;overflow-y:auto;"><code class="language-yaml">{{ rule.to_yaml() }}</code></pre>
+</div>
+{% endfor %}
+
+<div style="margin-top:1rem;display:flex;justify-content:flex-end;">
+  <a href="/sigma/download" class="btn btn-primary">Download all Sigma rules ↓</a>
+</div>
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function copySigma(btn) {
+  const pre = btn.closest('div').nextElementSibling;
+  const code = pre.querySelector('code') || pre;
+  navigator.clipboard.writeText(code.textContent).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 2000);
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,812 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">Analytics Dashboard
+    {% if has_data %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.75rem">
+      {{ sessions|length }} session{{ 's' if sessions|length != 1 else '' }}
+      {% if filename %}&nbsp;·&nbsp;<span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+</header>
+
+<div class="content">
+
+{% if not has_data %}
+  <div class="empty-state">
+    <svg style="width:52px;height:52px;stroke:var(--bg3);fill:none;stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round;margin-bottom:1.25rem" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+      <line x1="3" y1="9" x2="21" y2="9"/>
+      <line x1="3" y1="15" x2="21" y2="15"/>
+      <line x1="9" y1="9" x2="9" y2="21"/>
+    </svg>
+    <strong style="font-size:15px;color:var(--text2);">No data loaded</strong>
+    <p>Upload a PowerShell session file to see analytics.<br>
+       Go to the <a href="/" style="color:var(--accent);text-decoration:underline;">Dashboard</a> to upload a file.</p>
+  </div>
+
+{% else %}
+
+  {# ── JSON data blob ── #}
+  <script id="an-data" type="application/json">
+  {
+    "tier_counts":       {{ tier_counts | tojson }},
+    "all_scores":        {{ all_scores  | tojson }},
+    "scores_over_time":  {{ scores_over_time | tojson }},
+    "technique_counts":  {{ technique_counts | tojson }},
+    "tactic_rows":       {{ tactic_rows | tojson }},
+    "host_risks":        {{ host_risks  | tojson }},
+    "tempo_counts":      {{ tempo_counts | tojson }},
+    "ioc_type_counts":   {{ ioc_type_counts | tojson }},
+    "top_iocs":          {{ top_iocs | tojson }},
+    "dur_buckets":       {{ dur_buckets | tojson }},
+    "dur_labels":        {{ dur_labels  | tojson }}
+  }
+  </script>
+
+  {# ── KPI strip ── #}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+
+    <div style="background:var(--red-bg);border:1px solid rgba(229,52,58,.2);border-radius:var(--radius);padding:6px 14px;font-size:12px;font-weight:600;color:var(--red-text);">
+      <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ tier_counts.get('P1_INCIDENT',0) }}</span>
+      <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">P1 Incidents</span>
+    </div>
+
+    <div style="background:var(--amber-bg);border:1px solid rgba(217,119,6,.2);border-radius:var(--radius);padding:6px 14px;font-size:12px;font-weight:600;color:var(--amber-text);">
+      <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ tier_counts.get('P2_ALERT',0) }}</span>
+      <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">P2 Alerts</span>
+    </div>
+
+    <div style="background:var(--teal-bg);border:1px solid rgba(5,150,105,.2);border-radius:var(--radius);padding:6px 14px;font-size:12px;font-weight:600;color:var(--teal-text);">
+      <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ tier_counts.get('P3_SUSPICIOUS',0) }}</span>
+      <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">P3 Suspicious</span>
+    </div>
+
+    <div style="background:var(--blue-bg);border:1px solid rgba(37,99,235,.2);border-radius:var(--radius);padding:6px 14px;font-size:12px;font-weight:600;color:var(--blue-text);">
+      <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ host_risks|length }}</span>
+      <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">Unique Hosts</span>
+    </div>
+
+    <div style="background:var(--purple-bg);border:1px solid rgba(91,108,249,.2);border-radius:var(--radius);padding:6px 14px;font-size:12px;font-weight:600;color:var(--purple-text);">
+      <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ unique_iocs }}</span>
+      <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">Unique IOCs</span>
+    </div>
+
+    <div style="background:var(--amber-bg);border:1px solid rgba(217,119,6,.2);border-radius:var(--radius);padding:6px 14px;font-size:12px;font-weight:600;color:var(--amber-text);">
+      <span style="font-size:20px;font-weight:700;letter-spacing:-.04em;display:block;line-height:1;">{{ beacon_count }}</span>
+      <span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;opacity:.75;">Beacon Sessions</span>
+    </div>
+
+  </div>
+
+  {# ── Row 1: 4-column mini charts ── #}
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;">
+
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+      <div class="stat-label" style="margin-bottom:.5rem;">Alert Tiers</div>
+      <canvas id="an-tier" width="200" height="130" style="width:100%;height:130px;display:block;"></canvas>
+    </div>
+
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+      <div class="stat-label" style="margin-bottom:.5rem;">Score Distribution</div>
+      <canvas id="an-score-hist" width="200" height="130" style="width:100%;height:130px;display:block;"></canvas>
+    </div>
+
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+      <div class="stat-label" style="margin-bottom:.5rem;">Session Tempo</div>
+      <canvas id="an-tempo" width="200" height="130" style="width:100%;height:130px;display:block;"></canvas>
+    </div>
+
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+      <div class="stat-label" style="margin-bottom:.5rem;">IOC Types</div>
+      <canvas id="an-ioc-types" width="200" height="130" style="width:100%;height:130px;display:block;"></canvas>
+    </div>
+
+  </div>
+
+  {# ── Row 2: Score over time (full width) ── #}
+  {% if scores_over_time %}
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:12px;">
+    <div class="stat-label" style="margin-bottom:.5rem;">Risk Score Over Time</div>
+    <canvas id="an-sot" width="1000" height="160" style="width:100%;height:160px;display:block;"></canvas>
+  </div>
+  {% endif %}
+
+  {# ── Row 3: Top Techniques + Host Risk ── #}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+      <div class="stat-label" style="margin-bottom:.5rem;">Top Techniques</div>
+      <canvas id="an-techs" width="500" height="240" style="width:100%;height:240px;display:block;"></canvas>
+    </div>
+
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+      <div class="stat-label" style="margin-bottom:.5rem;">Host Risk Breakdown</div>
+      <canvas id="an-hosts" width="500" height="240" style="width:100%;height:240px;display:block;"></canvas>
+    </div>
+
+  </div>
+
+  {# ── Row 4: MITRE Tactic Coverage (full width) ── #}
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:12px;">
+    <div class="section-header" style="margin-bottom:.5rem;">
+      <span class="section-title">MITRE ATT&amp;CK Tactic Coverage</span>
+      <span style="font-size:11px;color:var(--text3);">Technique hits grouped by attack phase</span>
+    </div>
+    <canvas id="an-tactics" width="1000" height="190" style="width:100%;height:190px;display:block;"></canvas>
+  </div>
+
+  {# ── Row 5: Top IOCs + Duration Distribution ── #}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+      <div class="stat-label" style="margin-bottom:.5rem;">Top IOCs by Frequency</div>
+      <canvas id="an-iocs" width="500" height="200" style="width:100%;height:200px;display:block;"></canvas>
+    </div>
+
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;">
+      <div class="stat-label" style="margin-bottom:.5rem;">Session Duration Distribution</div>
+      <canvas id="an-dur" width="500" height="200" style="width:100%;height:200px;display:block;"></canvas>
+    </div>
+
+  </div>
+
+  {# ── Row 6: Detection Coverage ── #}
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:0;">
+    <div class="section-header" style="margin-bottom:.875rem;">
+      <span class="section-title">Detection Coverage</span>
+      <span style="font-size:11px;color:var(--text3);">{{ sigma_covered_count }} of {{ total_techniques }} techniques have dedicated Sigma rules &nbsp;·&nbsp; <strong style="color:var(--teal-text);">{{ sigma_pct }}%</strong></span>
+    </div>
+    <div style="height:10px;background:var(--bg3);border-radius:99px;overflow:hidden;">
+      <div style="height:100%;width:{{ sigma_pct }}%;background:var(--teal);border-radius:99px;"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-top:5px;">
+      <span>{{ sigma_covered_count }} techniques covered</span>
+      <span>{{ total_techniques - sigma_covered_count }} gaps remaining</span>
+    </div>
+  </div>
+
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if has_data %}
+<script>
+(function() {
+  /* ── read a CSS variable ── */
+  function css(v) {
+    return getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  }
+
+  /* ── draw "no data" placeholder ── */
+  function noData(ctx, W, H) {
+    ctx.save();
+    ctx.fillStyle = css('--text3');
+    ctx.font = '11px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('No data', W / 2, H / 2);
+    ctx.restore();
+  }
+
+  /* ── rounded rect helper ── */
+  function rRect(ctx, x, y, w, h, r) {
+    if (w <= 0 || h <= 0) return;
+    r = Math.min(r, w / 2, h / 2);
+    if (ctx.roundRect) {
+      ctx.roundRect(x, y, w, h, r);
+    } else {
+      ctx.rect(x, y, w, h);
+    }
+  }
+
+  /* ================================================================
+     donut(id, segs)
+     segs = [{label, value, color}]
+     Left half: donut arc   Right half: legend
+     ================================================================ */
+  function donut(id, segs) {
+    var canvas = document.getElementById(id);
+    if (!canvas) return;
+    var dpr = window.devicePixelRatio || 1;
+    var W   = canvas.offsetWidth  || canvas.width;
+    var H   = canvas.offsetHeight || canvas.height;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    if (!segs || !segs.length) { noData(ctx, W, H); return; }
+
+    var total = 0;
+    for (var i = 0; i < segs.length; i++) total += segs[i].value;
+    if (total === 0) { noData(ctx, W, H); return; }
+
+    var cx = W * 0.3;
+    var cy = H / 2;
+    var ro = Math.min(cx, cy) * 0.88;
+    var ri = ro * 0.5;
+
+    /* draw arcs */
+    var angle = -Math.PI / 2;
+    for (var i = 0; i < segs.length; i++) {
+      var sweep = (segs[i].value / total) * 2 * Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, ro, angle, angle + sweep);
+      ctx.closePath();
+      ctx.fillStyle = segs[i].color;
+      ctx.fill();
+      angle += sweep;
+    }
+
+    /* punch out inner circle */
+    ctx.beginPath();
+    ctx.arc(cx, cy, ri, 0, 2 * Math.PI);
+    ctx.fillStyle = css('--card');
+    ctx.fill();
+
+    /* center label */
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = css('--text');
+    ctx.font = 'bold ' + Math.round(ri * 0.7) + 'px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+    ctx.fillText(String(total), cx, cy - ri * 0.12);
+    ctx.fillStyle = css('--text3');
+    ctx.font = Math.round(ri * 0.32) + 'px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+    ctx.fillText('total', cx, cy + ri * 0.32);
+    ctx.restore();
+
+    /* legend on right half */
+    var lx     = W * 0.58;
+    var rowH   = H / (segs.length + 1);
+    var startY = (H - rowH * segs.length) / 2 + rowH * 0.5;
+    for (var i = 0; i < segs.length; i++) {
+      var ly = startY + i * rowH;
+      /* color square */
+      ctx.fillStyle = segs[i].color;
+      ctx.beginPath();
+      rRect(ctx, lx, ly - 4, 8, 8, 2);
+      ctx.fill();
+      /* label */
+      ctx.fillStyle = css('--text2');
+      ctx.font = '10px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(segs[i].label, lx + 12, ly);
+      /* count */
+      ctx.fillStyle = css('--text');
+      ctx.font = 'bold 10px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(String(segs[i].value), W - 4, ly);
+    }
+  }
+
+  /* ================================================================
+     vertBars(id, labels, values, colors)
+     colors = per-bar color array
+     ================================================================ */
+  function vertBars(id, labels, values, colors) {
+    var canvas = document.getElementById(id);
+    if (!canvas) return;
+    var dpr = window.devicePixelRatio || 1;
+    var W   = canvas.offsetWidth  || canvas.width;
+    var H   = canvas.offsetHeight || canvas.height;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    if (!values || !values.length) { noData(ctx, W, H); return; }
+
+    var maxV   = 0;
+    for (var i = 0; i < values.length; i++) if (values[i] > maxV) maxV = values[i];
+    if (maxV === 0) { noData(ctx, W, H); return; }
+
+    var chartH  = H - 18;
+    var n       = values.length;
+    var padL    = 4;
+    var padR    = 4;
+    var gap     = 4;
+    var barW    = (W - padL - padR - gap * (n - 1)) / n;
+
+    /* subtle max line */
+    ctx.strokeStyle = css('--border');
+    ctx.lineWidth   = 0.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(padL, 2);
+    ctx.lineTo(W - padR, 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (var i = 0; i < n; i++) {
+      var bx  = padL + i * (barW + gap);
+      var bh  = (values[i] / maxV) * (chartH - 4);
+      var by  = chartH - bh;
+      var col = colors ? (colors[i] || css('--teal')) : css('--teal');
+
+      /* bar */
+      if (bh > 0) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        rRect(ctx, bx, by, barW, bh, 3);
+        ctx.fill();
+      }
+
+      /* count above bar */
+      if (values[i] > 0) {
+        ctx.fillStyle = css('--text2');
+        ctx.font = 'bold 9px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(String(values[i]), bx + barW / 2, by - 1);
+      }
+
+      /* label below */
+      ctx.fillStyle = css('--text3');
+      ctx.font = '7px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(labels[i] || '', bx + barW / 2, chartH + 2);
+    }
+  }
+
+  /* ================================================================
+     horizBars(id, labels, values, color)
+     ================================================================ */
+  function horizBars(id, labels, values, color) {
+    var canvas = document.getElementById(id);
+    if (!canvas) return;
+    var dpr = window.devicePixelRatio || 1;
+    var W   = canvas.offsetWidth  || canvas.width;
+    var H   = canvas.offsetHeight || canvas.height;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    if (!labels || !labels.length) { noData(ctx, W, H); return; }
+
+    var maxV = 0;
+    for (var i = 0; i < values.length; i++) if (values[i] > maxV) maxV = values[i];
+    if (maxV === 0) { noData(ctx, W, H); return; }
+
+    var lw   = W * 0.38;
+    var vw   = W - lw - 28;
+    var n    = labels.length;
+    var rowH = H / n;
+    var barH = Math.min(11, rowH * 0.52);
+    var col  = color || css('--teal');
+
+    for (var i = 0; i < n; i++) {
+      var cy = i * rowH + rowH / 2;
+
+      /* label */
+      ctx.fillStyle = css('--text2');
+      ctx.font = '10px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      var lbl = String(labels[i] || '');
+      if (lbl.length > 22) lbl = lbl.substring(0, 21) + '…';
+      ctx.fillText(lbl, lw - 6, cy);
+
+      /* track */
+      ctx.fillStyle = css('--border');
+      ctx.beginPath();
+      rRect(ctx, lw, cy - barH / 2, vw, barH, 2);
+      ctx.fill();
+
+      /* filled bar */
+      var bw = (values[i] / maxV) * vw;
+      if (bw > 0) {
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        rRect(ctx, lw, cy - barH / 2, bw, barH, 2);
+        ctx.fill();
+      }
+
+      /* count */
+      ctx.fillStyle = css('--text3');
+      ctx.font = '9px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(values[i] || 0), lw + vw + 4, cy);
+    }
+  }
+
+  /* ================================================================
+     stackedHorizBars(id, labels, stacks, colors)
+     stacks = [{label, values:[p1,p2,p3,...]}]
+     colors = [RED, AMBER, TEAL]
+     ================================================================ */
+  function stackedHorizBars(id, stacks, colors) {
+    var canvas = document.getElementById(id);
+    if (!canvas) return;
+    var dpr = window.devicePixelRatio || 1;
+    var W   = canvas.offsetWidth  || canvas.width;
+    var H   = canvas.offsetHeight || canvas.height;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    if (!stacks || !stacks.length) { noData(ctx, W, H); return; }
+
+    /* Legend at top */
+    var legendH  = 16;
+    var lnames   = ['P1', 'P2', 'P3'];
+    var legendX  = 4;
+    ctx.font     = '9px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+    ctx.textBaseline = 'middle';
+    for (var li = 0; li < lnames.length; li++) {
+      ctx.fillStyle = colors[li] || css('--teal');
+      ctx.fillRect(legendX, legendH / 2 - 4, 8, 8);
+      ctx.fillStyle = css('--text3');
+      ctx.textAlign = 'left';
+      ctx.fillText(lnames[li], legendX + 11, legendH / 2);
+      legendX += 32;
+    }
+
+    var maxTotal = 0;
+    for (var i = 0; i < stacks.length; i++) {
+      var sum = 0;
+      for (var j = 0; j < stacks[i].values.length; j++) sum += stacks[i].values[j];
+      if (sum > maxTotal) maxTotal = sum;
+    }
+    if (maxTotal === 0) { noData(ctx, W, H); return; }
+
+    var lw      = W * 0.32;
+    var countW  = 28;
+    var vw      = W - lw - countW;
+    var n       = stacks.length;
+    var availH  = H - legendH;
+    var rowH    = availH / n;
+    var barH    = Math.min(12, rowH * 0.55);
+
+    for (var i = 0; i < n; i++) {
+      var cy  = legendH + i * rowH + rowH / 2;
+      var row = stacks[i];
+
+      /* host label */
+      ctx.fillStyle = css('--text2');
+      ctx.font = '10px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      var lbl = String(row.label || '');
+      if (lbl.length > 18) lbl = lbl.substring(0, 17) + '…';
+      ctx.fillText(lbl, lw - 6, cy);
+
+      /* track */
+      ctx.fillStyle = css('--border');
+      ctx.beginPath();
+      rRect(ctx, lw, cy - barH / 2, vw, barH, 2);
+      ctx.fill();
+
+      /* stacked segments */
+      var total = 0;
+      for (var j = 0; j < row.values.length; j++) total += row.values[j];
+      var bx = lw;
+      for (var j = 0; j < row.values.length; j++) {
+        if (row.values[j] <= 0) continue;
+        var segW = (row.values[j] / maxTotal) * vw;
+        ctx.fillStyle = colors[j] || css('--teal');
+        ctx.beginPath();
+        rRect(ctx, bx, cy - barH / 2, segW, barH, 2);
+        ctx.fill();
+        bx += segW;
+      }
+
+      /* total count */
+      ctx.fillStyle = css('--text3');
+      ctx.font = '9px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(total), lw + vw + 4, cy);
+    }
+  }
+
+  /* ================================================================
+     lineChart(id, points)
+     points = [{ts, score, tier}]
+     ================================================================ */
+  function lineChart(id, points) {
+    var canvas = document.getElementById(id);
+    if (!canvas) return;
+    var dpr = window.devicePixelRatio || 1;
+    var W   = canvas.offsetWidth  || canvas.width;
+    var H   = canvas.offsetHeight || canvas.height;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    if (!points || points.length < 2) { noData(ctx, W, H); return; }
+
+    var ML = 40;  /* left margin for Y axis */
+    var MB = 25;  /* bottom for X labels */
+    var MT = 6;
+    var MR = 8;
+    var cW = W - ML - MR;
+    var cH = H - MT - MB;
+
+    /* gridlines Y: 0, 25, 50, 75, 100 */
+    var yLabels = [0, 25, 50, 75, 100];
+    ctx.strokeStyle = css('--border');
+    ctx.lineWidth   = 0.5;
+    ctx.setLineDash([3, 3]);
+    ctx.font = '9px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (var gi = 0; gi < yLabels.length; gi++) {
+      var yv = yLabels[gi];
+      var gy = MT + cH - (yv / 100) * cH;
+      ctx.beginPath();
+      ctx.moveTo(ML, gy);
+      ctx.lineTo(W - MR, gy);
+      ctx.stroke();
+      ctx.fillStyle = css('--text3');
+      ctx.fillText(String(yv), ML - 4, gy);
+    }
+    ctx.setLineDash([]);
+
+    /* map point to canvas coords */
+    var n = points.length;
+    function px(i) { return ML + (i / (n - 1)) * cW; }
+    function py(s) { return MT + cH - (Math.min(100, Math.max(0, s)) / 100) * cH; }
+
+    /* gradient fill */
+    var grad = ctx.createLinearGradient(0, MT, 0, MT + cH);
+    grad.addColorStop(0,   'rgba(229,52,58,.15)');
+    grad.addColorStop(0.5, 'rgba(5,150,105,.08)');
+    grad.addColorStop(1,   'rgba(5,150,105,.0)');
+    ctx.beginPath();
+    ctx.moveTo(px(0), py(points[0].score));
+    for (var i = 1; i < n; i++) ctx.lineTo(px(i), py(points[i].score));
+    ctx.lineTo(px(n - 1), MT + cH);
+    ctx.lineTo(px(0), MT + cH);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    /* colored line segments */
+    for (var i = 1; i < n; i++) {
+      var s = points[i].score;
+      var lineColor = s >= 80 ? css('--red') : s >= 60 ? css('--amber') : css('--teal');
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth   = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(px(i - 1), py(points[i - 1].score));
+      ctx.lineTo(px(i), py(s));
+      ctx.stroke();
+    }
+
+    /* dots */
+    var tierColors = {
+      'P1_INCIDENT':  css('--red'),
+      'P2_ALERT':     css('--amber'),
+      'P3_SUSPICIOUS':css('--teal'),
+      'INFO':         css('--blue'),
+      'CLEAN':        css('--text3')
+    };
+    for (var i = 0; i < n; i++) {
+      var dc = tierColors[points[i].tier] || css('--text3');
+      ctx.beginPath();
+      ctx.arc(px(i), py(points[i].score), 3, 0, 2 * Math.PI);
+      ctx.fillStyle = dc;
+      ctx.fill();
+      ctx.strokeStyle = css('--card');
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    /* X axis labels — every Nth to avoid crowding */
+    var step = Math.ceil(n / 8);
+    ctx.fillStyle = css('--text3');
+    ctx.font = '8px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (var i = 0; i < n; i += step) {
+      var lbl = String(points[i].ts || '');
+      if (lbl.length > 12) lbl = lbl.substring(0, 12);
+      ctx.fillText(lbl, px(i), MT + cH + 4);
+    }
+  }
+
+  /* ================================================================
+     tacticBars(id, tactics)
+     tactics = [{name, count, total, active}]
+     ================================================================ */
+  function tacticBars(id, tactics) {
+    var canvas = document.getElementById(id);
+    if (!canvas) return;
+    var dpr = window.devicePixelRatio || 1;
+    var W   = canvas.offsetWidth  || canvas.width;
+    var H   = canvas.offsetHeight || canvas.height;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    if (!tactics || !tactics.length) { noData(ctx, W, H); return; }
+
+    var maxCount = 0;
+    for (var i = 0; i < tactics.length; i++) if (tactics[i].count > maxCount) maxCount = tactics[i].count;
+
+    var lw     = W * 0.20;
+    var metaW  = 52;
+    var vw     = W - lw - metaW;
+    var n      = tactics.length;
+    var rowH   = H / n;
+    var barH   = Math.min(13, rowH * 0.52);
+
+    for (var i = 0; i < n; i++) {
+      var t  = tactics[i];
+      var cy = i * rowH + rowH / 2;
+
+      /* tactic name */
+      ctx.fillStyle = t.active ? css('--text2') : css('--text3');
+      ctx.font = '10px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      var lbl = String(t.name || '');
+      if (lbl.length > 16) lbl = lbl.substring(0, 15) + '…';
+      ctx.fillText(lbl, lw - 6, cy);
+
+      /* track */
+      ctx.fillStyle = css('--bg3');
+      ctx.beginPath();
+      rRect(ctx, lw, cy - barH / 2, vw, barH, 2);
+      ctx.fill();
+
+      /* filled bar */
+      var barColor;
+      if (!t.active || t.count === 0) {
+        barColor = css('--bg3');
+      } else if (maxCount > 0 && t.count / maxCount >= 0.5) {
+        barColor = css('--red');
+      } else {
+        barColor = css('--amber');
+      }
+
+      if (t.count > 0 && maxCount > 0) {
+        var bw = (t.count / maxCount) * vw;
+        ctx.fillStyle = barColor;
+        ctx.beginPath();
+        rRect(ctx, lw, cy - barH / 2, bw, barH, 2);
+        ctx.fill();
+      }
+
+      /* hit count and technique count */
+      ctx.fillStyle = t.active ? css('--text2') : css('--text3');
+      ctx.font = '9px -apple-system,BlinkMacSystemFont,"Inter",sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t.count + '/' + t.total, lw + vw + 5, cy);
+    }
+  }
+
+  /* ================================================================
+     RENDER — parse data and call chart functions
+     ================================================================ */
+  requestAnimationFrame(function() {
+    var dataEl = document.getElementById('an-data');
+    if (!dataEl) return;
+
+    var d;
+    try { d = JSON.parse(dataEl.textContent || dataEl.innerText); }
+    catch(e) { return; }
+
+    var RED    = css('--red');
+    var AMBER  = css('--amber');
+    var TEAL   = css('--teal');
+    var BLUE   = css('--blue');
+    var ACCENT = css('--accent');
+    var TEXT3  = css('--text3');
+    var DIM    = css('--bg3');
+
+    /* ── Alert Tiers donut ── */
+    var tc  = d.tier_counts || {};
+    var tierSegs = [];
+    if (tc['P1_INCIDENT'])   tierSegs.push({label:'P1 Incident',   value:tc['P1_INCIDENT'],   color:RED});
+    if (tc['P2_ALERT'])      tierSegs.push({label:'P2 Alert',      value:tc['P2_ALERT'],      color:AMBER});
+    if (tc['P3_SUSPICIOUS']) tierSegs.push({label:'P3 Suspicious', value:tc['P3_SUSPICIOUS'], color:TEAL});
+    if (tc['INFO'])          tierSegs.push({label:'Info',          value:tc['INFO'],          color:BLUE});
+    if (tc['CLEAN'])         tierSegs.push({label:'Clean',         value:tc['CLEAN'],         color:DIM});
+    donut('an-tier', tierSegs);
+
+    /* ── Score distribution vertBars ── */
+    var scores = d.all_scores || [];
+    var buckets = [0, 0, 0, 0, 0];
+    for (var i = 0; i < scores.length; i++) {
+      var s = scores[i];
+      if      (s < 20)  buckets[0]++;
+      else if (s < 40)  buckets[1]++;
+      else if (s < 60)  buckets[2]++;
+      else if (s < 80)  buckets[3]++;
+      else              buckets[4]++;
+    }
+    vertBars('an-score-hist',
+      ['0-20','20-40','40-60','60-80','80+'],
+      buckets,
+      [DIM, TEAL, AMBER, AMBER, RED]
+    );
+
+    /* ── Session Tempo horizBars ── */
+    var tc2    = d.tempo_counts || {};
+    var tempoL = [];
+    var tempoV = [];
+    for (var k in tc2) {
+      if (!tc2.hasOwnProperty(k)) continue;
+      tempoL.push(k.replace(/_/g, ' '));
+      tempoV.push(tc2[k]);
+    }
+    horizBars('an-tempo', tempoL, tempoV, BLUE);
+
+    /* ── IOC Types donut ── */
+    var iocColors = [ACCENT, TEAL, AMBER, RED, BLUE, TEXT3];
+    var itc  = d.ioc_type_counts || {};
+    var iocSegs = [];
+    var ci = 0;
+    for (var k in itc) {
+      if (!itc.hasOwnProperty(k)) continue;
+      iocSegs.push({label:k, value:itc[k], color:iocColors[ci % iocColors.length]});
+      ci++;
+    }
+    donut('an-ioc-types', iocSegs);
+
+    /* ── Score over time line chart ── */
+    lineChart('an-sot', d.scores_over_time || []);
+
+    /* ── Top Techniques horizBars ── */
+    var tcs  = d.technique_counts || [];
+    var techL = [];
+    var techV = [];
+    for (var i = 0; i < tcs.length; i++) {
+      techL.push(String(tcs[i].tech || ''));
+      techV.push(tcs[i].count || 0);
+    }
+    horizBars('an-techs', techL, techV, TEAL);
+
+    /* ── Host Risk stacked bars ── */
+    var hr    = d.host_risks || [];
+    var hostStacks = [];
+    for (var i = 0; i < hr.length; i++) {
+      hostStacks.push({
+        label: String(hr[i].host_id || ''),
+        values: [hr[i].p1 || 0, hr[i].p2 || 0, hr[i].p3 || 0]
+      });
+    }
+    stackedHorizBars('an-hosts', hostStacks, [RED, AMBER, TEAL]);
+
+    /* ── MITRE Tactic Coverage ── */
+    tacticBars('an-tactics', d.tactic_rows || []);
+
+    /* ── Top IOCs horizBars ── */
+    var tiocs = d.top_iocs || [];
+    var iocL  = [];
+    var iocV  = [];
+    for (var i = 0; i < tiocs.length; i++) {
+      var lbl = String(tiocs[i].value || '');
+      if (lbl.length > 35) lbl = lbl.substring(0, 34) + '…';
+      iocL.push(lbl);
+      iocV.push(tiocs[i].count || 0);
+    }
+    horizBars('an-iocs', iocL, iocV, AMBER);
+
+    /* ── Session Duration vertBars ── */
+    vertBars('an-dur',
+      d.dur_labels  || [],
+      d.dur_buckets || [],
+      [BLUE, BLUE, TEAL, AMBER, RED]
+    );
+  });
+
+})();
+</script>
+{% endif %}
+{% endblock %}

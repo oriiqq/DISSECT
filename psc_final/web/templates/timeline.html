@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    Attack Timeline
+    {% if total_sessions %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {{ total_sessions }} event{{ 's' if total_sessions != 1 else '' }}
+      &nbsp;·&nbsp; {{ unique_host_count }} host{{ 's' if unique_host_count != 1 else '' }}
+      &nbsp;·&nbsp; {{ min_label }}{% if max_label != min_label %} → {{ max_label }}{% endif %}
+    </span>
+    {% endif %}
+  </span>
+  {% if total_sessions %}
+  <button onclick="window.print()" class="btn btn-sm">Print</button>
+  {% endif %}
+</header>
+
+<div class="content">
+{% if not date_groups %}
+<div class="empty-state">
+  <svg style="width:40px;height:40px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="10"/>
+    <polyline points="12 6 12 12 16 14"/>
+  </svg>
+  <p>No timeline data — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+</div>
+{% else %}
+
+<!-- ── Temporal Activity Heatmap ── -->
+{% if heatmap_cells %}
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);
+            padding:.75rem 1rem;margin-bottom:1.25rem;">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:.6rem;">
+    <span style="font-size:11px;font-weight:600;color:var(--text);">Activity Heatmap</span>
+    <span style="font-size:10px;color:var(--text3);">hour of day × day of week &nbsp;·&nbsp; color = max severity</span>
+    <div style="margin-left:auto;display:flex;gap:6px;align-items:center;font-size:9px;color:var(--text3);">
+      <span>Low</span>
+      <div style="display:flex;gap:2px;">
+        <div style="width:10px;height:10px;border-radius:2px;background:var(--blue-bg);border:0.5px solid var(--blue);"></div>
+        <div style="width:10px;height:10px;border-radius:2px;background:var(--teal-bg);border:0.5px solid var(--teal);"></div>
+        <div style="width:10px;height:10px;border-radius:2px;background:var(--amber-bg);border:0.5px solid var(--amber);"></div>
+        <div style="width:10px;height:10px;border-radius:2px;background:var(--red-bg);border:0.5px solid var(--red);"></div>
+      </div>
+      <span>High</span>
+    </div>
+  </div>
+  <!-- Hour labels -->
+  <div style="display:flex;margin-left:28px;margin-bottom:2px;">
+    {% for h in range(24) %}
+    <div style="flex:1;text-align:center;font-size:8px;color:var(--text3);">
+      {% if h % 4 == 0 %}{{ '%02d'|format(h) }}{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <!-- Grid rows: Mon–Sun -->
+  {% set days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+  {% for dow in range(7) %}
+  <div style="display:flex;align-items:center;gap:0;margin-bottom:2px;">
+    <div style="width:28px;font-size:9px;color:var(--text3);flex-shrink:0;">{{ days[dow] }}</div>
+    {% for hour in range(24) %}
+    {% set cell = heatmap_cells | selectattr('dow','eq',dow) | selectattr('hour','eq',hour) | list %}
+    {% if cell %}
+    {% set c = cell[0] %}
+    {% if c.max_tier == 'P1_INCIDENT' %}{% set bg = 'var(--red-bg)' %}{% set bd = 'var(--red)' %}
+    {% elif c.max_tier == 'P2_ALERT' %}{% set bg = 'var(--amber-bg)' %}{% set bd = 'var(--amber)' %}
+    {% elif c.max_tier == 'P3_WARNING' %}{% set bg = 'var(--teal-bg)' %}{% set bd = 'var(--teal)' %}
+    {% else %}{% set bg = 'var(--blue-bg)' %}{% set bd = 'var(--blue)' %}{% endif %}
+    <div style="flex:1;height:14px;border-radius:2px;background:{{ bg }};border:0.5px solid {{ bd }};margin:0 1px;cursor:default;"
+         title="{{ days[dow] }} {{ '%02d'|format(hour) }}:00 — {{ c.count }} session{{ 's' if c.count != 1 else '' }}, max score {{ c.max_score | round | int }}"></div>
+    {% else %}
+    <div style="flex:1;height:14px;border-radius:2px;background:var(--bg2);margin:0 1px;"></div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- ── Legend ── -->
+<div class="tl-legend">
+  <span class="tl-legend-title">Severity</span>
+  {% for label, color in [('P1 Incident','var(--red)'),('P2 Alert','var(--amber)'),('P3 Warning','var(--teal)'),('Info','var(--blue)')] %}
+  <span class="tl-legend-item">
+    <span class="tl-legend-dot" style="background:{{ color }};"></span>{{ label }}
+  </span>
+  {% endfor %}
+</div>
+
+<!-- ── Timeline ── -->
+<div class="tl-root">
+
+{% for group in date_groups %}
+
+<!-- ── Date separator ── -->
+<div class="tl-date-row{% if loop.first %} tl-date-first{% endif %}">
+  <div class="tl-date-gutter"></div>
+  <div class="tl-date-spine"></div>
+  <div class="tl-date-label-wrap">
+    <span class="tl-date-label">{{ group.label }}</span>
+    <div class="tl-date-rule"></div>
+    <span class="tl-date-count">{{ group.sessions | length }} event{{ 's' if group.sessions | length != 1 else '' }}</span>
+  </div>
+</div>
+
+{% for s in group.sessions %}
+{# Resolve tier color once per session #}
+{% if s.alert_tier == 'P1_INCIDENT' %}{% set tc = 'var(--red)' %}{% set tc_bg = 'var(--red-bg)' %}
+{% elif s.alert_tier == 'P2_ALERT' %}{% set tc = 'var(--amber)' %}{% set tc_bg = 'var(--amber-bg)' %}
+{% elif s.alert_tier == 'P3_WARNING' %}{% set tc = 'var(--teal)' %}{% set tc_bg = 'var(--teal-bg)' %}
+{% elif s.alert_tier == 'INFO' %}{% set tc = 'var(--blue)' %}{% set tc_bg = 'var(--blue-bg)' %}
+{% else %}{% set tc = 'var(--border)' %}{% set tc_bg = 'var(--bg2)' %}{% endif %}
+
+<!-- ── Event row ── -->
+<div class="tl-event-row">
+
+  <!-- Timestamp column -->
+  <div class="tl-gutter">
+    <span class="tl-time">{{ s.start_time.strftime('%H:%M:%S') if s.start_time else '—' }}</span>
+  </div>
+
+  <!-- Spine column -->
+  <div class="tl-spine-col">
+    <div class="tl-spine-top"></div>
+    <div class="tl-node" style="background:{{ tc }};box-shadow:0 0 0 3px {{ tc_bg }};"></div>
+    <div class="tl-spine-bottom"></div>
+  </div>
+
+  <!-- Event card -->
+  <div class="tl-card" style="border-left-color:{{ tc }};"
+       onclick="toggleSession('{{ s.session_id }}')"
+       id="card-{{ s.session_id }}">
+
+    <!-- Header row: tier + host + score -->
+    <div class="tl-card-header">
+      <span class="badge {{ tier_cls(s.alert_tier) }}" style="flex-shrink:0;">{{ s.alert_tier.replace('_',' ') }}</span>
+      <span class="tl-hostname">{{ s.host_id }}</span>
+      <span class="tl-score" style="color:{{ tc }};">{{ s.weighted_score | round | int }}</span>
+    </div>
+
+    <!-- Techniques -->
+    {% if s.technique_set %}
+    <div class="tl-techniques">
+      {% for t in s.technique_set | sort %}<span class="tech-tag">{{ t }}</span>{% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Metadata footer -->
+    <div class="tl-meta">
+      <span>PID&thinsp;{{ s.process_id }}</span>
+      <span class="tl-meta-sep">·</span>
+      <span>{{ s.blocks | length }} block{{ 's' if s.blocks | length != 1 else '' }}</span>
+      {% if s.duration_seconds > 0 %}
+      <span class="tl-meta-sep">·</span>
+      <span>
+        {%- if s.duration_seconds < 60 %}{{ s.duration_seconds | int }}s
+        {%- elif s.duration_seconds < 3600 %}{{ (s.duration_seconds / 60) | int }}m&thinsp;{{ (s.duration_seconds % 60) | int }}s
+        {%- else %}{{ (s.duration_seconds / 3600) | int }}h&thinsp;{{ ((s.duration_seconds % 3600) / 60) | int }}m{%- endif %}
+      </span>
+      {% endif %}
+      <span class="tl-meta-sep">·</span>
+      <span>{{ s.tempo.value.replace('_',' ') }}</span>
+      {% if s.iocs %}
+      <span class="tl-meta-sep">·</span>
+      <span>{{ s.iocs | length }} IOC{{ 's' if s.iocs | length != 1 else '' }}</span>
+      {% endif %}
+      {% if s.campaign_id %}
+      <span class="tl-meta-sep">·</span>
+      <span style="color:var(--purple-text);">campaign {{ s.campaign_id[:8] }}</span>
+      {% endif %}
+      <span class="tl-expand-hint" id="hint-{{ s.session_id }}">↓ expand</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Expandable detail panel -->
+<div class="tl-detail-wrap" id="detail-{{ s.session_id }}" style="display:none;">
+  <div class="tl-detail-gutter"></div>
+  <div class="tl-detail-spine"></div>
+  <div class="tl-detail-body" id="detail-body-{{ s.session_id }}">
+    <div class="tl-detail-loading">Loading…</div>
+  </div>
+</div>
+
+{% endfor %}
+{% endfor %}
+
+<!-- Spine cap at bottom -->
+<div class="tl-cap-row">
+  <div class="tl-gutter"></div>
+  <div class="tl-spine-col">
+    <div class="tl-spine-top" style="min-height:16px;"></div>
+    <div class="tl-cap"></div>
+  </div>
+  <div style="flex:1;"></div>
+</div>
+
+</div><!-- /tl-root -->
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+/* ── Timeline layout ── */
+.tl-legend        { display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:1.5rem; }
+.tl-legend-title  { font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3); }
+.tl-legend-item   { display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text2); }
+.tl-legend-dot    { width:9px;height:9px;border-radius:50%;flex-shrink:0; }
+
+.tl-root          { max-width:860px; }
+
+/* Shared three-column structure: [gutter] [spine] [content] */
+.tl-gutter        { width:72px;flex-shrink:0; }
+.tl-spine-col     { width:28px;flex-shrink:0;display:flex;flex-direction:column;align-items:center; }
+.tl-spine-top     { width:1.5px;min-height:10px;background:var(--border);flex-shrink:0; }
+.tl-spine-bottom  { width:1.5px;flex:1;min-height:10px;background:var(--border);flex-shrink:0; }
+.tl-node          { width:11px;height:11px;border-radius:50%;flex-shrink:0;z-index:1; }
+.tl-cap           { width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0; }
+
+/* Date separator row */
+.tl-date-row      { display:flex;align-items:stretch;min-height:40px;margin-top:2rem; }
+.tl-date-first    { margin-top:0; }
+.tl-date-spine    { width:28px;flex-shrink:0;display:flex;flex-direction:column;align-items:center; }
+.tl-date-spine::before { content:'';width:1.5px;flex:1;background:var(--border); }
+.tl-date-gutter   { width:72px;flex-shrink:0; }
+.tl-date-label-wrap { flex:1;display:flex;align-items:center;gap:10px;padding:0 0 0 12px; }
+.tl-date-label    { font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);white-space:nowrap; }
+.tl-date-rule     { flex:1;height:0.5px;background:var(--border); }
+.tl-date-count    { font-size:10px;color:var(--text3);white-space:nowrap; }
+
+/* Event row */
+.tl-event-row     { display:flex;align-items:flex-start;margin-bottom:3px; }
+
+.tl-time          { display:block;font-family:var(--mono);font-size:10.5px;color:var(--text3);
+                    text-align:right;padding-top:10px;padding-right:2px;line-height:1; }
+
+/* Card */
+.tl-card          { flex:1;background:var(--card);border:0.5px solid var(--border);
+                    border-left-width:3px;border-radius:0 var(--radius) var(--radius) 0;
+                    padding:.55rem .9rem;cursor:pointer;margin-left:10px;
+                    transition:background .1s;margin-bottom:2px; }
+.tl-card:hover    { background:var(--bg); }
+.tl-card-header   { display:flex;align-items:center;gap:8px;margin-bottom:5px; }
+.tl-hostname      { font-family:var(--mono);font-size:12px;font-weight:500;color:var(--text);flex:1;
+                    overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.tl-score         { font-size:15px;font-weight:700;flex-shrink:0; }
+.tl-techniques    { margin-bottom:5px;line-height:1.6; }
+.tl-meta          { font-size:10.5px;color:var(--text3);display:flex;align-items:center;flex-wrap:wrap;gap:2px; }
+.tl-meta-sep      { opacity:.4;margin:0 1px; }
+.tl-expand-hint   { margin-left:auto;font-size:10px;color:var(--text3);opacity:.5;flex-shrink:0;transition:opacity .1s; }
+.tl-card:hover .tl-expand-hint { opacity:1; }
+
+/* Detail panel */
+.tl-detail-wrap   { display:flex;align-items:stretch;margin-bottom:4px; }
+.tl-detail-gutter { width:72px;flex-shrink:0; }
+.tl-detail-spine  { width:28px;flex-shrink:0;display:flex;justify-content:center; }
+.tl-detail-spine::before { content:'';width:1.5px;background:var(--border); }
+.tl-detail-body   { flex:1;margin-left:10px;border-left:3px solid var(--border2);border-radius:0 var(--radius-lg) var(--radius-lg) 0;
+                    background:var(--bg);padding:0;overflow:hidden; }
+.tl-detail-loading { padding:.75rem 1rem;font-size:12px;color:var(--text3); }
+
+/* Bottom cap row */
+.tl-cap-row       { display:flex;align-items:flex-start; }
+
+/* Print styles */
+@media print {
+  .sidebar, .topbar { display:none !important; }
+  .shell { display:block; }
+  .main  { width:100%;overflow:visible; }
+  .tl-card { break-inside:avoid; }
+  .tl-card:hover { background:var(--card); }
+}
+</style>
+
+<script>
+const _open = {};
+
+function toggleSession(id) {
+  const wrap   = document.getElementById('detail-' + id);
+  const hint   = document.getElementById('hint-' + id);
+  const body   = document.getElementById('detail-body-' + id);
+  if (!wrap) return;
+
+  if (_open[id]) {
+    wrap.style.display = 'none';
+    if (hint) hint.textContent = '↓ expand';
+    _open[id] = false;
+  } else {
+    wrap.style.display = 'flex';
+    if (hint) hint.textContent = '↑ collapse';
+    _open[id] = true;
+
+    if (!body.dataset.loaded) {
+      htmx.ajax('GET', '/sessions/' + id, {target: '#detail-body-' + id, swap: 'innerHTML'});
+      body.dataset.loaded = '1';
+    }
+
+    setTimeout(() => wrap.scrollIntoView({behavior: 'smooth', block: 'nearest'}), 80);
+  }
+}
+</script>
+{% endblock %}
