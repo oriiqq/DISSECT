@@ -1,4 +1,4 @@
-# ps_classifier
+# DISSECT
 
 **PowerShell transcript anomaly classifier for DFIR teams.**
 
