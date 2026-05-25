@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">Export</span>
+</header>
+
+<!-- Sub-tab nav -->
+<div class="subtab-nav">
+  <button class="subtab-btn st-active" onclick="switchExportTab('report', this)">HTML Report</button>
+  <button class="subtab-btn"           onclick="switchExportTab('navigator', this)">ATT&CK Navigator</button>
+  <button class="subtab-btn"           onclick="switchExportTab('stix', this)">STIX 2.1</button>
+</div>
+
+{# ═══════ REPORT TAB #}
+<div id="tab-report" class="tab-pane st-visible">
+<div class="content">
+  <div style="max-width:560px;">
+    <div class="section-header"><span class="section-title">HTML Investigation Report</span></div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1.25rem;line-height:1.7;">
+      A self-contained HTML report with executive summary, all findings, session details, IOC tables, and MITRE ATT&CK coverage — ready to share with stakeholders or attach to a ticket.
+    </p>
+    {% if has_data %}
+    <a href="/report/download" class="btn btn-primary" style="font-size:13px;padding:8px 20px;">Download HTML Report ↓</a>
+    {% else %}
+    <div class="empty-state" style="padding:2rem 0;">
+      <p>No analysis loaded — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+</div>
+
+{# ═══════ NAVIGATOR TAB #}
+<div id="tab-navigator" class="tab-pane">
+<div class="content">
+  <div style="max-width:560px;">
+    <div class="section-header"><span class="section-title">MITRE ATT&CK Navigator Layer</span></div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1.25rem;line-height:1.7;">
+      JSON layer file for the MITRE ATT&CK Navigator. Techniques are coloured by frequency of detection — ready to import into <a href="https://mitre-attack.github.io/attack-navigator/" target="_blank" rel="noopener" style="color:var(--accent);">attack.mitre.org/attack-navigator</a>.
+    </p>
+    {% if has_data %}
+    <a href="/navigator/download" class="btn btn-primary" style="font-size:13px;padding:8px 20px;">Download Navigator Layer ↓</a>
+    {% else %}
+    <div class="empty-state" style="padding:2rem 0;">
+      <p>No analysis loaded — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+</div>
+
+{# ═══════ STIX TAB #}
+<div id="tab-stix" class="tab-pane">
+<div class="content">
+  <div style="max-width:560px;">
+    <div class="section-header"><span class="section-title">STIX 2.1 Bundle</span></div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1.25rem;line-height:1.7;">
+      Structured Threat Information Expression (STIX 2.1) bundle containing all attack-patterns, indicators, and relationships. Compatible with TAXII servers and threat-intelligence platforms.
+    </p>
+    {% if has_data %}
+    <a href="/stix/download" class="btn btn-primary" style="font-size:13px;padding:8px 20px;">Download STIX Bundle ↓</a>
+    {% else %}
+    <div class="empty-state" style="padding:2rem 0;">
+      <p>No analysis loaded — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchExportTab(name, btn) {
+  ['report','navigator','stix'].forEach(function(t) {
+    var p = document.getElementById('tab-' + t);
+    if (p) p.classList.remove('st-visible');
+  });
+  var pane = document.getElementById('tab-' + name);
+  if (pane) pane.classList.add('st-visible');
+  btn.closest('.subtab-nav').querySelectorAll('.subtab-btn').forEach(function(b) { b.classList.remove('st-active'); });
+  btn.classList.add('st-active');
+}
+</script>
+{% endblock %}

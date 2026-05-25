@@ -1,0 +1,637 @@
+{% if not sessions %}
+<!-- ── Empty state (full width, no split) ── -->
+<div style="padding:2rem;">
+  <div class="upload-zone"
+       onclick="document.getElementById('file-input').click()"
+       ondragover="event.preventDefault(); this.classList.add('drag-over')"
+       ondragleave="this.classList.remove('drag-over')"
+       ondrop="event.preventDefault(); this.classList.remove('drag-over'); doUpload(event.dataTransfer.files[0])">
+    <div style="margin-bottom:.75rem;">
+      <svg style="width:36px;height:36px;fill:none;stroke:var(--text3);stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;margin:0 auto .75rem;display:block;opacity:.5;"
+           viewBox="0 0 24 24">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="17 8 12 3 7 8"/>
+        <line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+    </div>
+    <div class="uz-title">Drop a log file to analyse</div>
+    <p style="font-size:12px;margin-top:.5rem;position:relative;">
+      Accepts <strong>.evtx</strong> (Windows Security / PowerShell-Operational) or <strong>.json</strong> (SIEM export)
+    </p>
+  </div>
+  <div class="empty-state">
+    <p>Upload an EVTX or JSON log file to get started.</p>
+    <p style="margin-top:.25rem;font-size:12px;">Needs Event ID 4104 — enable Script Block Logging first.</p>
+  </div>
+</div>
+
+{% else %}
+
+{# ── Tier counts ── #}
+{% set n_p1    = sessions | selectattr('alert_tier','eq','P1_INCIDENT') | list | length %}
+{% set n_p2    = sessions | selectattr('alert_tier','eq','P2_ALERT')    | list | length %}
+{% set n_p3    = sessions | selectattr('alert_tier','eq','P3_WARNING')  | list | length %}
+{% set n_info  = sessions | selectattr('alert_tier','eq','INFO')        | list | length %}
+{% set n_clean = sessions | length - n_p1 - n_p2 - n_p3 - n_info %}
+{% set total   = sessions | length %}
+
+<!-- ── Collect all technique IDs for analytics ── -->
+{% set _all_techs = [] %}
+{% for s in sessions %}{% for t in s.technique_set %}{% if _all_techs.append(t) %}{% endif %}{% endfor %}{% endfor %}
+
+<!-- ── Analytics Charts Row ── -->
+<div id="v1-analytics-bar" style="border-bottom:1px solid var(--border);">
+
+  <!-- Header -->
+  <div style="padding:.35rem .875rem;display:flex;align-items:center;gap:6px;background:var(--bg);border-bottom:0.5px solid var(--border);">
+    <svg style="width:11px;height:11px;fill:none;stroke:var(--text3);stroke-width:2;" viewBox="0 0 24 24">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+    <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);">
+      Analytics &nbsp;<span style="opacity:.5;font-weight:400;">{{ total }} session{{ 's' if total != 1 else '' }}</span>
+    </span>
+    <button id="v1-analytics-btn" onclick="v1ToggleAnalytics()"
+            style="margin-left:auto;font-size:9px;color:var(--text3);background:none;border:none;cursor:pointer;padding:1px 5px;border-radius:var(--radius);">
+      ▾ collapse
+    </button>
+  </div>
+
+  <!-- Charts body -->
+  <div id="v1-analytics-body" style="display:flex;gap:0;overflow-x:auto;background:var(--bg2);padding:.55rem .25rem .7rem;">
+
+    <!-- 1 ── Tier Donut -->
+    <div style="flex:0 0 auto;width:190px;padding:0 .7rem;border-right:0.5px solid var(--border);">
+      <div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:5px;">Alert Tiers</div>
+      <div style="display:flex;align-items:center;gap:9px;">
+        <canvas id="ch-tier" width="90" height="90" style="flex-shrink:0;display:block;"></canvas>
+        <div style="font-size:9.5px;line-height:2;">
+          {% if n_p1 > 0    %}<div><span style="color:var(--red);">■</span>&nbsp;P1 &nbsp;<strong style="color:var(--text);">{{ n_p1 }}</strong></div>{% endif %}
+          {% if n_p2 > 0    %}<div><span style="color:var(--amber);">■</span>&nbsp;P2 &nbsp;<strong style="color:var(--text);">{{ n_p2 }}</strong></div>{% endif %}
+          {% if n_p3 > 0    %}<div><span style="color:var(--teal);">■</span>&nbsp;P3 &nbsp;<strong style="color:var(--text);">{{ n_p3 }}</strong></div>{% endif %}
+          {% if n_info > 0  %}<div><span style="color:var(--blue);">■</span>&nbsp;Info <strong>{{ n_info }}</strong></div>{% endif %}
+          {% if n_clean > 0 %}<div><span style="color:var(--text3);">■</span>&nbsp;Clean <strong>{{ n_clean }}</strong></div>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 ── Score Histogram -->
+    <div style="flex:0 0 auto;width:205px;padding:0 .7rem;border-right:0.5px solid var(--border);">
+      <div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:5px;">Risk Score Distribution</div>
+      <canvas id="ch-score" width="182" height="90" style="display:block;"></canvas>
+    </div>
+
+    <!-- 3 ── Top Techniques -->
+    <div style="flex:1 1 215px;min-width:185px;max-width:400px;padding:0 .7rem;border-right:0.5px solid var(--border);">
+      <div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:5px;">Top Techniques</div>
+      <canvas id="ch-techs" width="360" height="108" style="display:block;width:100%;height:108px;"></canvas>
+    </div>
+
+    <!-- 4 ── Top Hosts by Score -->
+    <div style="flex:1 1 185px;min-width:155px;max-width:300px;padding:0 .7rem;">
+      <div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:5px;">Top Hosts by Score</div>
+      <canvas id="ch-hosts" width="275" height="108" style="display:block;width:100%;height:108px;"></canvas>
+    </div>
+
+  </div>
+</div>
+
+<!-- JSON payload for chart JS (techniques only — scores/hosts come from the existing DOM rows) -->
+<script type="application/json" id="v1-adata">
+{"scores":{{ sessions | map(attribute='weighted_score') | list | tojson }},"techs":{{ _all_techs | tojson }}}
+</script>
+
+<!-- ══════════════════════════════════════════════════════════════
+     SPLIT PANE
+     ══════════════════════════════════════════════════════════════ -->
+<div class="split-pane">
+
+  <!-- ── LEFT PANE: stats + filter + table ── -->
+  <div class="split-left" id="v1-split-left">
+
+    <!-- Compact stats row -->
+    <div style="padding:.75rem .875rem .6rem;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:.5rem;">
+        {% if n_p1 > 0 %}
+        <button class="stat-chip p1" onclick="pillFilter('P1_INCIDENT',this)" title="P1 Incidents — click to filter">
+          <span class="stat-chip-val">{{ n_p1 }}</span>
+          <span class="stat-chip-lbl">P1</span>
+        </button>
+        {% endif %}
+        {% if n_p2 > 0 %}
+        <button class="stat-chip p2" onclick="pillFilter('P2_ALERT',this)" title="P2 Alerts — click to filter">
+          <span class="stat-chip-val">{{ n_p2 }}</span>
+          <span class="stat-chip-lbl">P2</span>
+        </button>
+        {% endif %}
+        {% if n_p3 > 0 %}
+        <button class="stat-chip p3" onclick="pillFilter('P3_WARNING',this)" title="P3 Warnings — click to filter">
+          <span class="stat-chip-val">{{ n_p3 }}</span>
+          <span class="stat-chip-lbl">P3</span>
+        </button>
+        {% endif %}
+        <span style="margin-left:auto;font-size:11px;color:var(--text3);">
+          {{ total }} session{{ 's' if total != 1 else '' }}
+          {% if stats.campaigns > 0 %}&nbsp;·&nbsp; {{ stats.campaigns }} campaign{{ 's' if stats.campaigns != 1 else '' }}{% endif %}
+        </span>
+      </div>
+      <!-- Tier distribution bar -->
+      <div class="tier-bar" style="margin-bottom:0;" title="Tier distribution">
+        {% if n_p1    > 0 %}<div class="tier-bar-seg" style="flex:{{ n_p1 }};background:var(--red);"   title="P1: {{ n_p1 }}"></div>{% endif %}
+        {% if n_p2    > 0 %}<div class="tier-bar-seg" style="flex:{{ n_p2 }};background:var(--amber);" title="P2: {{ n_p2 }}"></div>{% endif %}
+        {% if n_p3    > 0 %}<div class="tier-bar-seg" style="flex:{{ n_p3 }};background:var(--teal);"  title="P3: {{ n_p3 }}"></div>{% endif %}
+        {% if n_info  > 0 %}<div class="tier-bar-seg" style="flex:{{ n_info }};background:var(--blue);"  title="Info: {{ n_info }}"></div>{% endif %}
+        {% if n_clean > 0 %}<div class="tier-bar-seg" style="flex:{{ n_clean }};background:var(--bg3);" title="Clean: {{ n_clean }}"></div>{% endif %}
+      </div>
+    </div>
+
+    <!-- Filter bar -->
+    <div style="padding:.55rem .875rem;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:.45rem;flex-shrink:0;">
+      <!-- Search input -->
+      <div style="display:flex;gap:4px;align-items:center;">
+        <div class="search-wrap" style="flex:1;">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="search-input" id="f-search" type="text"
+                 placeholder="Search host, PID, technique…"
+                 oninput="filterSessions()">
+        </div>
+        <button onclick="v1ToggleDeepSearch()"
+                title="Deep search — scans decoded script content"
+                id="deep-search-btn"
+                style="flex-shrink:0;width:28px;height:28px;border-radius:var(--radius);border:1px solid var(--border);
+                       background:transparent;color:var(--text3);cursor:pointer;font-size:11px;
+                       display:flex;align-items:center;justify-content:center;transition:all .12s;">
+          <svg style="width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24">
+            <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+          </svg>
+        </button>
+      </div>
+      <!-- Deep search panel -->
+      <div id="deep-search-panel" style="display:none;">
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input class="search-input" id="f-deep" type="text"
+                 placeholder="Search decoded script content (press Enter)…"
+                 onkeydown="if(event.key==='Enter') v1DeepSearch(this.value)">
+        </div>
+        <div id="deep-results" style="font-size:11px;color:var(--text3);padding:3px 2px;"></div>
+      </div>
+      <!-- Pill tier buttons + score -->
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <div class="pill-group" id="tier-pills">
+          <button class="pill-btn pill-all active" data-tier="" onclick="pillTierBtn(this)">All</button>
+          <button class="pill-btn pill-p1" data-tier="P1_INCIDENT" onclick="pillTierBtn(this)">P1</button>
+          <button class="pill-btn pill-p2" data-tier="P2_ALERT"    onclick="pillTierBtn(this)">P2</button>
+          <button class="pill-btn pill-p3" data-tier="P3_WARNING"  onclick="pillTierBtn(this)">P3</button>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+          <div class="v1-density-toggle" title="Row density">
+            <button class="v1-density-btn" data-density="compact" onclick="v1SetDensity('compact')" title="Compact">▪▪</button>
+            <button class="v1-density-btn active" data-density="normal" onclick="v1SetDensity('normal')" title="Normal">▬</button>
+            <button class="v1-density-btn" data-density="comfortable" onclick="v1SetDensity('comfortable')" title="Comfortable">▭</button>
+          </div>
+          <span style="color:var(--border);font-size:12px;">|</span>
+          <label style="font-size:11px;color:var(--text3);">Score≥</label>
+          <input id="f-score" type="number" placeholder="0" oninput="filterSessions()" min="0" max="100"
+                 style="width:46px;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);
+                        border-radius:var(--radius);background:var(--card);color:var(--text);
+                        outline:none;transition:border-color .12s;"
+                 onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor=''">
+        </div>
+        <span id="filter-count" style="font-size:10.5px;color:var(--text3);"></span>
+      </div>
+    </div>
+
+    <!-- Session table header -->
+    <div style="flex-shrink:0;background:var(--bg);border-bottom:1px solid var(--border);">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr>
+            <th class="sortable" data-col="tier"  onclick="sortTable('tier')"  style="padding:7px 8px 7px 10px;">Tier</th>
+            <th class="sortable sort-desc" data-col="score" onclick="sortTable('score')" style="padding:7px 8px;">Score</th>
+            <th class="sortable" data-col="host"  onclick="sortTable('host')"  style="padding:7px 8px;">Host</th>
+            <th style="padding:7px 8px;">Techniques</th>
+            <th class="sortable" data-col="time"  onclick="sortTable('time')"  style="padding:7px 8px 7px 6px;">Time</th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+
+    <!-- Session table (scrollable) -->
+    <div class="split-scroll" id="sessions-scroll">
+      <table id="sessions-table" style="width:100%;border-collapse:collapse;font-size:12px;">
+        <tbody id="sessions-tbody">
+          {% for s in sessions %}
+          {% set score = s.weighted_score | round | int %}
+          {% if s.alert_tier == 'P1_INCIDENT' %}{% set bar_color = 'var(--red)' %}
+          {% elif s.alert_tier == 'P2_ALERT'  %}{% set bar_color = 'var(--amber)' %}
+          {% elif s.alert_tier == 'P3_WARNING'%}{% set bar_color = 'var(--teal)' %}
+          {% else %}{% set bar_color = 'var(--blue)' %}{% endif %}
+          <tr class="session-row"
+              id="row-{{ s.session_id }}"
+              data-tier="{{ s.alert_tier }}"
+              data-host="{{ s.host_id | lower }}"
+              data-pid="{{ s.process_id }}"
+              data-score="{{ score }}"
+              data-blocks="{{ s.blocks | length }}"
+              data-iocs="{{ s.iocs | length }}"
+              data-time="{{ s.start_time.isoformat() if s.start_time else '' }}"
+              hx-get="/sessions/{{ s.session_id }}"
+              hx-target="#detail-panel"
+              hx-swap="innerHTML"
+              hx-on:click="selectRow('{{ s.session_id }}')"
+              title="{{ s.host_id }} · PID {{ s.process_id }} · {{ score }}/100"
+              style="border-bottom:1px solid var(--border);">
+            <td style="padding:7px 8px 7px 10px;vertical-align:middle;">
+              <span class="badge {{ tier_cls(s.alert_tier) }}" style="font-size:9px;padding:1px 6px;">
+                {{ s.alert_tier.split('_')[0] }}
+              </span>
+            </td>
+            <td style="padding:7px 8px;vertical-align:middle;">
+              <div class="score-bar-wrap">
+                <span class="score" style="font-size:13px;">{{ score }}</span>
+                <div class="score-mini-bar" style="width:{{ score }}%;background:{{ bar_color }};"></div>
+              </div>
+            </td>
+            <td style="padding:7px 8px;vertical-align:middle;max-width:130px;">
+              <div class="mono" style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ s.host_id }}">{{ s.host_id }}</div>
+              <div style="font-size:10px;color:var(--text3);">PID {{ s.process_id }}</div>
+            </td>
+            <td style="padding:7px 8px;vertical-align:middle;">
+              {% set techs = s.technique_set | sort | list %}
+              {% for t in techs[:3] %}<span class="tech-tag" style="font-size:9.5px;padding:1px 5px;">{{ t }}</span>{% endfor %}
+              {% if techs | length > 3 %}<span style="font-size:10px;color:var(--text3);">+{{ techs|length - 3 }}</span>{% endif %}
+            </td>
+            <td style="padding:7px 8px 7px 6px;vertical-align:middle;font-size:10.5px;color:var(--text3);white-space:nowrap;">
+              {{ s.start_time.strftime('%H:%M') if s.start_time else '—' }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Campaigns (below table, collapsible) -->
+    {% if campaigns %}
+    <div style="border-top:1px solid var(--border);flex-shrink:0;max-height:180px;overflow-y:auto;">
+      <details>
+        <summary style="padding:.5rem .875rem;font-size:11px;font-weight:600;color:var(--text2);
+                        background:var(--bg);cursor:pointer;user-select:none;
+                        display:flex;align-items:center;gap:6px;list-style:none;">
+          <svg style="width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;" viewBox="0 0 24 24">
+            <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+          </svg>
+          Campaigns
+          <span style="margin-left:4px;background:var(--purple-bg);color:var(--purple-text);font-size:9px;padding:1px 5px;border-radius:99px;font-weight:700;">{{ campaigns|length }}</span>
+        </summary>
+        <div style="padding:.5rem .875rem;">
+          {% for c in campaigns %}
+          <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius);
+                      padding:.5rem .75rem;margin-bottom:6px;font-size:11.5px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+              <span class="badge {% if c.is_confirmed %}tier-p1{% else %}tier-p2{% endif %}" style="font-size:9px;">
+                {{ 'Confirmed' if c.is_confirmed else 'Tentative' }}
+              </span>
+              <span style="font-weight:500;">Campaign <code style="font-size:11px">{{ c.campaign_id[:8] }}</code></span>
+              <span style="margin-left:auto;color:var(--text3);font-size:10.5px;">{{ c.sessions|length }}s · {{ c.host_ids|length }}h</span>
+            </div>
+            {% for h in c.host_ids | sort %}<span class="ioc-chip" style="font-size:10px;">{{ h }}</span>{% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+    {% endif %}
+
+    {% if upload_ts %}
+    <div style="padding:.4rem .875rem;border-top:1px solid var(--border);font-size:10px;color:var(--text3);
+                flex-shrink:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span>{{ filename }}</span>
+      <span style="opacity:.5;">·</span>
+      <span>{{ upload_ts }}</span>
+      <a href="/sigma/download"  style="color:var(--purple-text);margin-left:auto;">Sigma ↓</a>
+      <a href="/report/download" style="color:var(--amber-text);">Report ↓</a>
+    </div>
+    {% endif %}
+
+  </div><!-- /split-left -->
+
+  <!-- ── DRAG HANDLE ── -->
+  <div class="v1-pane-drag" id="v1-pane-drag" title="Drag to resize"></div>
+
+  <!-- ── RIGHT PANE: session detail ── -->
+  <div class="split-right">
+    <div id="detail-panel">
+      <!-- Default: select-session empty state -->
+      <div class="select-state">
+        <svg viewBox="0 0 24 24">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <line x1="3" y1="15" x2="21" y2="15"/>
+          <line x1="9" y1="9" x2="9" y2="21"/>
+        </svg>
+        <strong style="font-size:14px;color:var(--text2);">Select a session</strong>
+        <p>Click any row in the session list<br>to inspect its full detail here.</p>
+      </div>
+    </div>
+  </div><!-- /split-right -->
+
+</div><!-- /split-pane -->
+
+<script>
+/* ── Active tier from stat chip ── */
+function pillFilter(tier, chipEl) {
+  const pills = document.querySelectorAll('#tier-pills .pill-btn');
+  /* sync pills */
+  pills.forEach(p => {
+    p.classList.toggle('active', p.dataset.tier === tier);
+  });
+  /* sync chips */
+  document.querySelectorAll('.stat-chip').forEach(c => c.classList.remove('active-filter'));
+  if (chipEl) chipEl.classList.add('active-filter');
+  filterSessions();
+  if (typeof v1UpdateStatusBar === 'function') v1UpdateStatusBar();
+}
+
+/* ── Pill tier button click ── */
+function pillTierBtn(btn) {
+  document.querySelectorAll('#tier-pills .pill-btn').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  /* clear chip highlights */
+  document.querySelectorAll('.stat-chip').forEach(c => c.classList.remove('active-filter'));
+  filterSessions();
+  if (typeof v1UpdateStatusBar === 'function') v1UpdateStatusBar();
+}
+
+/* ── Row select ── */
+function selectRow(id) {
+  document.querySelectorAll('.session-row').forEach(r => r.classList.remove('selected'));
+  const row = document.getElementById('row-' + id);
+  if (row) row.classList.add('selected');
+  if (typeof v1UpdateStatusBar === 'function') v1UpdateStatusBar();
+}
+
+/* ── Unified filter ── */
+function filterSessions() {
+  const activePill = document.querySelector('#tier-pills .pill-btn.active');
+  const tier       = activePill ? (activePill.dataset.tier || '') : '';
+  const q          = (document.getElementById('f-search')?.value || '').toLowerCase();
+  const minScore   = parseInt(document.getElementById('f-score')?.value) || 0;
+  const rows       = document.querySelectorAll('.session-row');
+
+  let shown = 0;
+  rows.forEach(row => {
+    const hostMatch  = row.dataset.host.includes(q);
+    const pidMatch   = row.dataset.pid?.includes(q);
+    const techMatch  = Array.from(row.querySelectorAll('.tech-tag'))
+                           .some(t => t.textContent.toLowerCase().includes(q));
+    const match = (!tier || row.dataset.tier === tier) &&
+                  (!q    || hostMatch || pidMatch || techMatch) &&
+                  (parseInt(row.dataset.score) >= minScore);
+    row.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+
+  const el = document.getElementById('filter-count');
+  if (el) el.textContent = shown < rows.length ? shown + ' of ' + rows.length : '';
+  if (typeof v1UpdateStatusBar === 'function') v1UpdateStatusBar();
+}
+
+/* ── Column sort ── */
+let _sortCol = 'score', _sortDir = -1;
+
+function sortTable(col) {
+  if (_sortCol === col) { _sortDir *= -1; } else { _sortCol = col; _sortDir = -1; }
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.classList.remove('sort-asc','sort-desc');
+    if (th.dataset.col === col) th.classList.add(_sortDir === 1 ? 'sort-asc' : 'sort-desc');
+  });
+  const tbody = document.getElementById('sessions-tbody');
+  if (!tbody) return;
+  const rows  = Array.from(tbody.querySelectorAll('tr.session-row'));
+  const TIER_ORDER = {P1_INCIDENT:0,P2_ALERT:1,P3_WARNING:2,INFO:3,CLEAN:4};
+  rows.sort((a, b) => {
+    let av, bv;
+    if      (col === 'score')  { av = parseInt(a.dataset.score);  bv = parseInt(b.dataset.score); }
+    else if (col === 'tier')   { av = TIER_ORDER[a.dataset.tier]||9; bv = TIER_ORDER[b.dataset.tier]||9; }
+    else if (col === 'host')   { av = a.dataset.host; bv = b.dataset.host; }
+    else if (col === 'blocks') { av = parseInt(a.dataset.blocks); bv = parseInt(b.dataset.blocks); }
+    else if (col === 'iocs')   { av = parseInt(a.dataset.iocs);   bv = parseInt(b.dataset.iocs); }
+    else if (col === 'time')   { av = a.dataset.time || ''; bv = b.dataset.time || ''; }
+    else { return 0; }
+    if (av < bv) return -1 * _sortDir;
+    if (av > bv) return  1 * _sortDir;
+    return 0;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+}
+
+/* ── Score histogram + kill-chain (rendered in right pane on load) ── */
+/* These are now shown inside the session detail tabs, not the left pane */
+
+/* ── URL search param: /?search=TECHNIQUE pre-fills the search box ── */
+(function() {
+  const p = new URLSearchParams(window.location.search);
+  const q = p.get('search') || p.get('q');
+  if (q) {
+    const el = document.getElementById('f-search');
+    if (el) { el.value = q; filterSessions(); }
+  }
+})();
+
+/* ── Deep search ── */
+function v1ToggleDeepSearch() {
+  const panel = document.getElementById('deep-search-panel');
+  const btn   = document.getElementById('deep-search-btn');
+  if (!panel) return;
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : '';
+  if (btn) {
+    btn.style.background  = open ? 'transparent'           : 'var(--accent-bg)';
+    btn.style.color        = open ? 'var(--text3)'          : 'var(--accent-text)';
+    btn.style.borderColor  = open ? 'var(--border)'         : 'var(--accent)';
+  }
+  if (!open) setTimeout(() => document.getElementById('f-deep')?.focus(), 50);
+}
+
+function v1DeepSearch(q) {
+  if (!q || q.length < 2) return;
+  const resEl = document.getElementById('deep-results');
+  if (resEl) resEl.textContent = 'Searching…';
+  fetch('/api/search?q=' + encodeURIComponent(q))
+    .then(r => r.json())
+    .then(data => {
+      if (!resEl) return;
+      if (!data.results || !data.results.length) {
+        resEl.textContent = 'No matches found in decoded script content.';
+        return;
+      }
+      resEl.innerHTML = `<strong>${data.total}</strong> session${data.total !== 1 ? 's' : ''} matched — clicking a result loads the session detail:`;
+      const list = document.createElement('div');
+      list.style.cssText = 'margin-top:4px;display:flex;flex-direction:column;gap:3px;max-height:160px;overflow-y:auto;';
+      data.results.slice(0, 15).forEach(r => {
+        const btn = document.createElement('button');
+        btn.style.cssText = 'text-align:left;padding:4px 6px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--card);cursor:pointer;font-size:10.5px;color:var(--text2);';
+        const ctx = r.matching_blocks[0]?.context || '';
+        const qre = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi');
+        const hiCtx = ctx.slice(0,100).replace(qre, m => `<mark style="background:var(--amber-bg);color:var(--amber-text);border-radius:2px;">${m}</mark>`);
+        btn.innerHTML = `<span style="font-family:var(--mono);color:var(--text);">${r.host_id}</span> <span style="color:var(--text3);">PID ${r.process_id}</span> <span class="badge ${r.alert_tier==='P1_INCIDENT'?'tier-p1':r.alert_tier==='P2_ALERT'?'tier-p2':'tier-p3'}" style="font-size:8px;">${r.alert_tier.split('_')[0]}</span><br><span style="font-size:10px;color:var(--text3);font-family:var(--mono);">${hiCtx}</span>`;
+        btn.onclick = () => {
+          /* Select row and load detail via htmx */
+          const row = document.getElementById('row-' + r.session_id);
+          if (row) {
+            row.click();
+            row.scrollIntoView({ block: 'nearest' });
+          } else {
+            /* Fallback: load via htmx directly */
+            htmx.ajax('GET', '/sessions/' + r.session_id, { target: '#detail-panel', swap: 'innerHTML' });
+          }
+        };
+        list.appendChild(btn);
+      });
+      resEl.appendChild(list);
+    })
+    .catch(() => { if (resEl) resEl.textContent = 'Search failed.'; });
+}
+
+/* ── Analytics charts ──────────────────────────────────────────────────────── */
+(function () {
+  var raw;
+  try { raw = JSON.parse(document.getElementById('v1-adata').textContent); } catch (_) { return; }
+
+  /* Read CSS custom properties so charts honour the active theme */
+  var cs = getComputedStyle(document.documentElement);
+  function cv(n, f) { var v = cs.getPropertyValue(n).trim(); return v || f; }
+  var RED    = cv('--red',    '#e05555');
+  var AMBER  = cv('--amber',  '#d4a017');
+  var TEAL   = cv('--teal',   '#2dd4bf');
+  var BLUE   = cv('--blue',   '#5b8af5');
+  var DIM    = cv('--bg3', '') || cv('--border', '#2a2d40');
+  var TEXT   = cv('--text',   '#e0e0f0');
+  var TEXT3  = cv('--text3',  '#6677aa');
+  var BORDER = cv('--border', '#232540');
+
+  /* ── Donut chart ── */
+  function donut(id, segs) {
+    var c = document.getElementById(id); if (!c) return;
+    var x = c.getContext('2d'), W = c.width, H = c.height;
+    var cx = W / 2, cy = H / 2, ro = Math.min(cx, cy) - 2, ri = ro * 0.52;
+    var tot = segs.reduce(function (s, d) { return s + d.v; }, 0);
+    x.clearRect(0, 0, W, H);
+    if (!tot) {
+      x.fillStyle = BORDER;
+      x.beginPath(); x.arc(cx, cy, ro, 0, Math.PI * 2);
+      x.arc(cx, cy, ri, 0, Math.PI * 2, true); x.closePath(); x.fill(); return;
+    }
+    var a = -Math.PI / 2;
+    segs.forEach(function (seg) {
+      var sw = (seg.v / tot) * Math.PI * 2;
+      x.beginPath(); x.arc(cx, cy, ro, a, a + sw);
+      x.arc(cx, cy, ri, a + sw, a, true); x.closePath();
+      x.fillStyle = seg.c; x.fill(); a += sw;
+    });
+    /* Centre label */
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillStyle = TEXT;  x.font = 'bold 14px system-ui,sans-serif'; x.fillText(tot,     cx, cy - 4);
+    x.fillStyle = TEXT3; x.font = '7px system-ui,sans-serif';        x.fillText('total', cx, cy + 7);
+  }
+
+  /* ── Score histogram (5 buckets: 0-20, 20-40, 40-60, 60-80, 80+) ── */
+  function hist(id, rawScores) {
+    var c = document.getElementById(id); if (!c) return;
+    var x = c.getContext('2d'), W = c.width, H = c.height;
+    x.clearRect(0, 0, W, H);
+    var b = [0, 0, 0, 0, 0];
+    rawScores.forEach(function (s) { b[Math.min(4, Math.floor(s / 20))]++; });
+    var labs  = ['0-20', '20-40', '40-60', '60-80', '80+'];
+    var cols  = [DIM, TEAL, AMBER, AMBER, RED];
+    var mx    = Math.max.apply(null, b.concat([1]));
+    var chartH = H - 17, n = 5, bw = W / n, p = 3;
+    b.forEach(function (v, i) {
+      var bh = (v / mx) * chartH, px = i * bw + p, py = chartH - bh;
+      x.fillStyle = cols[i];
+      x.beginPath();
+      if (x.roundRect) x.roundRect(px, py, bw - p * 2, Math.max(bh, 1.5), 2);
+      else x.rect(px, py, bw - p * 2, Math.max(bh, 1.5));
+      x.fill();
+      x.textAlign = 'center';
+      if (v > 0) { x.fillStyle = TEXT;  x.font = '7px system-ui,sans-serif'; x.fillText(v, px + (bw - p * 2) / 2, py - 2); }
+      x.fillStyle = TEXT3; x.font = '7px system-ui,sans-serif';
+      x.fillText(labs[i], px + (bw - p * 2) / 2, H - 3);
+    });
+  }
+
+  /* ── Horizontal bar chart ── */
+  function hbars(id, labels, values, col) {
+    var c = document.getElementById(id); if (!c) return;
+    var x = c.getContext('2d'), W = c.width, H = c.height;
+    x.clearRect(0, 0, W, H);
+    if (!labels.length) {
+      x.fillStyle = TEXT3; x.font = '9px system-ui,sans-serif';
+      x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.fillText('No data', W / 2, H / 2); return;
+    }
+    var n = labels.length, lw = Math.round(W * 0.40), vw = W - lw - 24;
+    var rh = H / n, bh = Math.min(10, rh * 0.54);
+    var mx = Math.max.apply(null, values.concat([1]));
+    labels.forEach(function (lbl, i) {
+      var v = values[i], barW = (v / mx) * vw, by = i * rh + (rh - bh) / 2;
+      /* Label */
+      x.fillStyle = TEXT3; x.font = '8px monospace';
+      x.textAlign = 'right'; x.textBaseline = 'middle';
+      x.fillText(lbl.length > 16 ? lbl.slice(0, 15) + '…' : lbl, lw - 4, i * rh + rh / 2);
+      /* Track */
+      x.fillStyle = BORDER;
+      x.beginPath();
+      if (x.roundRect) x.roundRect(lw, by, vw, bh, 2); else x.rect(lw, by, vw, bh);
+      x.fill();
+      /* Filled bar */
+      if (barW > 0) {
+        x.fillStyle = col;
+        x.beginPath();
+        if (x.roundRect) x.roundRect(lw, by, barW, bh, 2); else x.rect(lw, by, barW, bh);
+        x.fill();
+      }
+      /* Value */
+      x.fillStyle = TEXT3; x.font = '8px monospace';
+      x.textAlign = 'left'; x.textBaseline = 'middle';
+      x.fillText(v, lw + barW + 3, i * rh + rh / 2);
+    });
+  }
+
+  /* ── Render charts ── */
+  donut('ch-tier', [
+    { v: {{ n_p1 }},    c: RED   },
+    { v: {{ n_p2 }},    c: AMBER },
+    { v: {{ n_p3 }},    c: TEAL  },
+    { v: {{ n_info }},  c: BLUE  },
+    { v: {{ n_clean }}, c: DIM   },
+  ].filter(function (s) { return s.v > 0; }));
+
+  hist('ch-score', raw.scores);
+
+  var tc = {};
+  raw.techs.forEach(function (t) { tc[t] = (tc[t] || 0) + 1; });
+  var tTop = Object.entries(tc).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 8);
+  hbars('ch-techs', tTop.map(function (e) { return e[0]; }), tTop.map(function (e) { return e[1]; }), TEAL);
+
+  var hm = {};
+  document.querySelectorAll('.session-row').forEach(function (r) {
+    var h = r.dataset.host, s = parseInt(r.dataset.score) || 0;
+    if (!hm[h] || s > hm[h]) hm[h] = s;
+  });
+  var hTop = Object.entries(hm).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 8);
+  hbars('ch-hosts', hTop.map(function (e) { return e[0]; }), hTop.map(function (e) { return e[1]; }), AMBER);
+})();
+
+function v1ToggleAnalytics() {
+  var body = document.getElementById('v1-analytics-body');
+  var btn  = document.getElementById('v1-analytics-btn');
+  if (!body) return;
+  var visible = body.style.display !== 'none';
+  body.style.display = visible ? 'none' : 'flex';
+  if (btn) btn.textContent = visible ? '▸ expand' : '▾ collapse';
+}
+</script>
+
+{% endif %}

@@ -1,0 +1,359 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    Lateral Movement
+    {% if move_count %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      {{ move_count }} detected hop{{ 's' if move_count != 1 else '' }} across {{ host_count }} host{{ 's' if host_count != 1 else '' }}
+      {% if filename %}&nbsp;·&nbsp; from <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+</header>
+
+<div class="content">
+{% if not edges %}
+<div class="empty-state">
+  <div style="font-size:28px;margin-bottom:.5rem">🌐</div>
+  <p>No lateral movement detected.</p>
+  <p style="margin-top:.25rem;font-size:12px;">
+    Lateral movement is inferred when sessions on different hosts share
+    WinRM / WMI / SMB techniques within a 30-minute window.
+    Upload a log file with multi-host activity on the
+    <a href="/" style="color:var(--purple-text)">Dashboard</a>.
+  </p>
+</div>
+
+{% else %}
+
+<!-- Summary cards -->
+<div style="display:flex;gap:12px;margin-bottom:1.25rem;flex-wrap:wrap;">
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.6rem 1rem;min-width:110px;">
+    <div style="font-size:22px;font-weight:700;color:var(--accent);">{{ host_count }}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px;">Hosts</div>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.6rem 1rem;min-width:110px;">
+    <div style="font-size:22px;font-weight:700;color:var(--red);">{{ move_count }}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px;">Movement Hops</div>
+  </div>
+  {% set tech_set = edges | map(attribute='technique') | unique | list %}
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.6rem 1rem;min-width:110px;">
+    <div style="font-size:22px;font-weight:700;color:var(--amber);">{{ tech_set | length }}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:2px;">Techniques</div>
+  </div>
+</div>
+
+<!-- Graph canvas -->
+<div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);
+            margin-bottom:1.25rem;position:relative;overflow:hidden;">
+  <div style="padding:.6rem 1rem .4rem;border-bottom:0.5px solid var(--border);
+              display:flex;align-items:center;gap:8px;">
+    <span style="font-size:12px;font-weight:600;">Host Topology Graph</span>
+    <span style="font-size:11px;color:var(--text3);">drag to rearrange · hover for details</span>
+    <div style="margin-left:auto;display:flex;gap:12px;font-size:11px;color:var(--text3);">
+      <span><svg style="width:10px;height:10px;display:inline;vertical-align:middle;" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--red)"/></svg> P1</span>
+      <span><svg style="width:10px;height:10px;display:inline;vertical-align:middle;" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--amber)"/></svg> P2</span>
+      <span><svg style="width:10px;height:10px;display:inline;vertical-align:middle;" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--teal)"/></svg> P3</span>
+      <span><svg style="width:10px;height:10px;display:inline;vertical-align:middle;" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="var(--text3)"/></svg> Clean</span>
+    </div>
+  </div>
+  <canvas id="lat-graph" style="width:100%;display:block;" height="380"></canvas>
+  <div id="lat-tooltip" style="display:none;position:absolute;background:var(--card);
+       border:0.5px solid var(--border);border-radius:var(--radius);padding:6px 10px;
+       font-size:11px;pointer-events:none;box-shadow:var(--shadow-sm);max-width:240px;"></div>
+</div>
+
+<!-- Movement table -->
+<h4 style="margin-bottom:.75rem;">Detected Lateral Moves</h4>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Source Host</th>
+        <th>Target Host</th>
+        <th style="width:140px;">Technique</th>
+        <th style="width:90px;">MITRE ID</th>
+        <th style="width:80px;">Time</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in edges %}
+      <tr>
+        <td class="mono" style="font-size:12px;">{{ e.source }}</td>
+        <td class="mono" style="font-size:12px;">
+          <span style="color:var(--red);margin-right:4px;">→</span>{{ e.target }}
+        </td>
+        <td>
+          <span class="badge tier-p2" style="font-size:10px;">{{ e.evidence }}</span>
+        </td>
+        <td>
+          <code class="mono" style="font-size:11px;">{{ e.mitre_id }}</code>
+        </td>
+        <td style="font-size:11px;color:var(--text3);">{{ e.ts or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if edges %}
+<script>
+// Graph data from server
+const NODES = {{ nodes | tojson }};
+const EDGES = {{ edges | tojson }};
+
+const TIER_COLORS = {
+  P1_INCIDENT: '#e5343a',
+  P2_ALERT:    '#d97706',
+  P3_WARNING:  '#059669',
+  INFO:        '#2563eb',
+  CLEAN:       '#8e93ab',
+};
+
+const canvas  = document.getElementById('lat-graph');
+const ctx     = canvas.getContext('2d');
+const tooltip = document.getElementById('lat-tooltip');
+
+// DPI scaling
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.style.width  = rect.width + 'px';
+  canvas.width  = rect.width * dpr;
+  canvas.height = 380 * dpr;
+  ctx.scale(dpr, dpr);
+}
+resize();
+window.addEventListener('resize', () => { resize(); layoutAndDraw(); });
+
+// Assign initial positions in a circle
+const W = () => parseInt(canvas.style.width);
+const H = 380;
+let positions = {};
+NODES.forEach((n, i) => {
+  const angle = (2 * Math.PI * i) / NODES.length;
+  const cx = W() / 2, cy = H / 2;
+  const r  = Math.min(cx, cy) * 0.62;
+  positions[n.id] = {
+    x: cx + r * Math.cos(angle),
+    y: cy + r * Math.sin(angle),
+    vx: 0, vy: 0,
+  };
+});
+
+// Force-directed physics
+function applyForces() {
+  const nodes = NODES.map(n => ({ ...n, ...positions[n.id] }));
+  const REPEL = 2200, SPRING = 0.08, DAMP = 0.82, IDEAL = 160;
+
+  // Repulsion between all nodes
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const dx = nodes[j].x - nodes[i].x;
+      const dy = nodes[j].y - nodes[i].y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const force = REPEL / (dist * dist);
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+      nodes[i].vx -= fx; nodes[i].vy -= fy;
+      nodes[j].vx += fx; nodes[j].vy += fy;
+    }
+  }
+
+  // Spring attraction along edges
+  EDGES.forEach(e => {
+    const a = nodes.find(n => n.id === e.source);
+    const b = nodes.find(n => n.id === e.target);
+    if (!a || !b) return;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const stretch = (dist - IDEAL) * SPRING;
+    const fx = (dx / dist) * stretch;
+    const fy = (dy / dist) * stretch;
+    a.vx += fx; a.vy += fy;
+    b.vx -= fx; b.vy -= fy;
+  });
+
+  // Integrate + dampen + clamp to canvas
+  nodes.forEach(n => {
+    n.vx *= DAMP; n.vy *= DAMP;
+    n.x = Math.max(50, Math.min(W() - 50, n.x + n.vx));
+    n.y = Math.max(40, Math.min(H  - 40, n.y + n.vy));
+    positions[n.id] = { x: n.x, y: n.y, vx: n.vx, vy: n.vy };
+  });
+}
+
+function drawGraph() {
+  const dpr = window.devicePixelRatio || 1;
+  ctx.clearRect(0, 0, W() * dpr, H * dpr);
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const edgeColor = isDark ? 'rgba(255,255,255,.12)' : 'rgba(0,0,0,.12)';
+  const arrowColor = isDark ? 'rgba(255,255,255,.35)' : 'rgba(0,0,0,.35)';
+  const labelColor = isDark ? '#e6e9f4' : '#0f1117';
+
+  // Draw edges
+  EDGES.forEach(e => {
+    const a = positions[e.source], b = positions[e.target];
+    if (!a || !b) return;
+
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = '#e5343a';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.globalAlpha = 0.55;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+
+    // Arrow at target
+    const arrowSize = 8;
+    const nx = dx / dist, ny = dy / dist;
+    const r = 18; // node radius
+    const tx = b.x - nx * r, ty = b.y - ny * r;
+    const px = -ny, py = nx;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(tx - nx * arrowSize + px * arrowSize * 0.5,
+               ty - ny * arrowSize + py * arrowSize * 0.5);
+    ctx.lineTo(tx - nx * arrowSize - px * arrowSize * 0.5,
+               ty - ny * arrowSize - py * arrowSize * 0.5);
+    ctx.closePath();
+    ctx.fillStyle = '#e5343a';
+    ctx.globalAlpha = 0.7;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Edge label (technique)
+    const midX = (a.x + b.x) / 2, midY = (a.y + b.y) / 2;
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.fillStyle = '#e5343a';
+    ctx.globalAlpha = 0.8;
+    ctx.textAlign = 'center';
+    ctx.fillText(e.evidence, midX, midY - 5);
+    ctx.globalAlpha = 1;
+  });
+
+  // Draw nodes
+  NODES.forEach(n => {
+    const p = positions[n.id];
+    if (!p) return;
+    const color = TIER_COLORS[n.tier] || TIER_COLORS.CLEAN;
+    const r = 18;
+
+    // Glow for high-severity nodes
+    if (n.tier === 'P1_INCIDENT' || n.tier === 'P2_ALERT') {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r + 6, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.12;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // Node circle
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = isDark ? '#151b28' : '#fff';
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // Label
+    ctx.font = 'bold 10px -apple-system, sans-serif';
+    ctx.fillStyle = labelColor;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = n.id.length > 12 ? n.id.slice(0, 11) + '…' : n.id;
+    ctx.fillText(label, p.x, p.y + r + 14);
+    ctx.textBaseline = 'alphabetic';
+  });
+}
+
+let _simRunning = true;
+let _simFrames  = 0;
+
+function layoutAndDraw() {
+  if (_simRunning) {
+    applyForces();
+    _simFrames++;
+    if (_simFrames > 180) _simRunning = false;
+  }
+  drawGraph();
+  if (_simRunning) requestAnimationFrame(layoutAndDraw);
+}
+requestAnimationFrame(layoutAndDraw);
+
+// Drag support
+let dragging = null, dragOffset = { x: 0, y: 0 };
+
+function getNode(mx, my) {
+  return NODES.find(n => {
+    const p = positions[n.id];
+    if (!p) return false;
+    const dx = p.x - mx, dy = p.y - my;
+    return Math.sqrt(dx * dx + dy * dy) <= 20;
+  });
+}
+
+canvas.addEventListener('mousedown', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  const n = getNode(mx, my);
+  if (n) {
+    dragging = n.id;
+    const p = positions[n.id];
+    dragOffset = { x: mx - p.x, y: my - p.y };
+    _simRunning = false;
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+  if (dragging) {
+    positions[dragging].x = mx - dragOffset.x;
+    positions[dragging].y = my - dragOffset.y;
+    drawGraph();
+    return;
+  }
+
+  // Tooltip on hover
+  const n = getNode(mx, my);
+  if (n) {
+    const hops = EDGES.filter(ed => ed.source === n.id || ed.target === n.id);
+    tooltip.innerHTML = `<strong>${n.id}</strong><br>Tier: ${n.tier}<br>Hops: ${hops.length}`;
+    tooltip.style.display = 'block';
+    tooltip.style.left = (mx + 14) + 'px';
+    tooltip.style.top  = (my - 8) + 'px';
+  } else {
+    tooltip.style.display = 'none';
+  }
+});
+
+canvas.addEventListener('mouseup', () => { dragging = null; });
+canvas.addEventListener('mouseleave', () => {
+  dragging = null;
+  tooltip.style.display = 'none';
+});
+
+// Re-draw on theme change
+document.addEventListener('theme-changed', () => drawGraph());
+</script>
+{% endif %}
+{% endblock %}

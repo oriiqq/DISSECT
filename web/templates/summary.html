@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">Executive Summary</span>
+  {% if has_data %}
+  <div style="display:flex;gap:6px;">
+    <a href="/navigator/download" class="btn btn-sm">ATT&CK Navigator ↓</a>
+    <a href="/report/download"    class="btn btn-sm">Full Report ↓</a>
+    <button onclick="window.print()" class="btn btn-sm btn-primary">Print / PDF</button>
+  </div>
+  {% endif %}
+</header>
+
+<div class="content">
+{% if not has_data %}
+<div class="empty-state">
+  <svg style="width:40px;height:40px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+    <rect x="3" y="3" width="18" height="18" rx="2"/>
+    <path d="M3 9h18M9 21V9"/>
+    <line x1="7" y1="15" x2="7" y2="17"/>
+    <line x1="12" y1="13" x2="12" y2="17"/>
+    <line x1="17" y1="11" x2="17" y2="17"/>
+  </svg>
+  <p>No analysis loaded — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+</div>
+{% else %}
+
+<!-- ── Risk level banner ── -->
+<div style="background:{{ risk_bg }};border:0.5px solid {{ risk_color }};border-radius:var(--radius-lg);
+            padding:1.25rem 1.5rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:1.25rem;">
+  <div style="flex-shrink:0;">
+    <div style="font-size:10px;font-weight:500;color:{{ risk_color }};text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px;">Overall Risk</div>
+    <div style="font-size:26px;font-weight:700;color:{{ risk_color }};line-height:1;">{{ risk_level }}</div>
+  </div>
+  <div style="flex:1;padding-left:1.25rem;border-left:1px solid {{ risk_color }};opacity:.9;font-size:13px;color:{{ risk_color }};">
+    {% if risk_level == 'CRITICAL' %}
+      Active incident indicators detected. Immediate response required.
+      {{ tier_counts.get('P1_INCIDENT', 0) }} P1 session(s) contain confirmed attack TTPs across {{ unique_hosts }} host(s).
+    {% elif risk_level == 'HIGH' %}
+      Alert-level activity detected across {{ stats.total }} session(s).
+      {{ tier_counts.get('P2_ALERT', 0) }} session(s) require analyst review.
+    {% elif risk_level == 'MEDIUM' %}
+      Warning-level activity detected. {{ tier_counts.get('P3_WARNING', 0) }} session(s)
+      scored above detection threshold and warrant investigation.
+    {% else %}
+      No significant threats detected. All {{ stats.total }} session(s) scored below alert threshold.
+    {% endif %}
+  </div>
+  <div style="flex-shrink:0;text-align:right;font-size:11px;color:{{ risk_color }};opacity:.7;">
+    {% if filename %}from <span class="mono">{{ filename }}</span><br>{% endif %}
+    {{ upload_ts or '' }}
+  </div>
+</div>
+
+<!-- ── Stats grid ── -->
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:1.5rem;">
+  <div class="stat-card p1">
+    <div class="stat-label">P1 Incidents</div>
+    <div class="stat-value">{{ tier_counts.get('P1_INCIDENT', 0) }}</div>
+  </div>
+  <div class="stat-card p2">
+    <div class="stat-label">P2 Alerts</div>
+    <div class="stat-value">{{ tier_counts.get('P2_ALERT', 0) }}</div>
+  </div>
+  <div class="stat-card p3">
+    <div class="stat-label">P3 Warnings</div>
+    <div class="stat-value">{{ tier_counts.get('P3_WARNING', 0) }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Sessions</div>
+    <div class="stat-value">{{ stats.total }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">ATT&CK TTPs</div>
+    <div class="stat-value">{{ mitre_counts | length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Unique IOCs</div>
+    <div class="stat-value">{{ unique_iocs }}</div>
+  </div>
+</div>
+
+<!-- ── Top Threats ── -->
+{% if top_sessions %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header">
+    <span class="section-title">Top Threats</span>
+    <a href="/" style="font-size:11px;color:var(--purple-text);">View all on Dashboard →</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Tier</th><th>Score</th><th>Host</th><th>Techniques</th><th>IOCs</th><th>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in top_sessions %}
+        <tr>
+          <td><span class="badge {{ tier_cls(s.alert_tier) }}">{{ s.alert_tier }}</span></td>
+          <td><span class="score">{{ s.weighted_score | round | int }}</span></td>
+          <td class="mono" style="font-size:11px;">{{ s.host_id[:36] }}</td>
+          <td>{% for t in s.technique_set | sort %}<span class="tech-tag">{{ t }}</span>{% endfor %}</td>
+          <td class="muted">{{ s.iocs | length }}</td>
+          <td style="font-size:11px;color:var(--text3);">{{ s.start_time.strftime('%Y-%m-%d %H:%M') if s.start_time else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ── Kill-Chain Progress Bar ── -->
+{% if tactic_breakdown %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header">
+    <span class="section-title">Kill-Chain Coverage</span>
+    <span style="font-size:11px;color:var(--text3);">{{ tactic_breakdown | selectattr('active') | list | length }} of {{ tactic_breakdown | length }} stages covered</span>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1rem;overflow-x:auto;">
+    <div style="display:flex;gap:0;min-width:540px;">
+      {% set stage_colors = {
+        'Execution':        ('var(--blue)',   'var(--blue-bg)',   'var(--blue-text)'),
+        'Defense Evasion':  ('var(--amber)',  'var(--amber-bg)',  'var(--amber-text)'),
+        'Persistence':      ('var(--teal)',   'var(--teal-bg)',   'var(--teal-text)'),
+        'Priv. Escalation': ('var(--purple)', 'var(--purple-bg)', 'var(--purple-text)'),
+        'Cred. Access':     ('var(--red)',    'var(--red-bg)',    'var(--red-text)'),
+        'Lateral Movement': ('var(--red)',    'var(--red-bg)',    'var(--red-text)'),
+        'Command & Control':('var(--red)',    'var(--red-bg)',    'var(--red-text)'),
+      } %}
+      {% for stage in tactic_breakdown %}
+      {% set colors = stage_colors.get(stage.name, ('var(--border)', 'var(--bg2)', 'var(--text3)')) %}
+      <div style="flex:1;min-width:0;position:relative;">
+        <!-- Connector arrow -->
+        {% if not loop.last %}
+        <div style="position:absolute;right:-1px;top:50%;transform:translateY(-50%);
+                    width:0;height:0;z-index:2;
+                    border-top:8px solid transparent;border-bottom:8px solid transparent;
+                    border-left:8px solid {% if stage.active %}{{ colors[0] }}{% else %}var(--border){% endif %};">
+        </div>
+        {% endif %}
+        <div style="margin-right:{% if not loop.last %}8px{% else %}0{% endif %};
+                    background:{% if stage.active %}{{ colors[1] }}{% else %}var(--bg2){% endif %};
+                    border:1px solid {% if stage.active %}{{ colors[0] }}{% else %}var(--border){% endif %};
+                    border-radius:{% if loop.first %}var(--radius) 0 0 var(--radius){% elif loop.last %}0 var(--radius) var(--radius) 0{% else %}0{% endif %};
+                    padding:.5rem .6rem;text-align:center;transition:all .2s;">
+          <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+                      color:{% if stage.active %}{{ colors[2] }}{% else %}var(--text3){% endif %};
+                      margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            {{ stage.name }}
+          </div>
+          {% if stage.active %}
+          <div style="font-size:16px;font-weight:700;color:{{ colors[0] }};">{{ stage.total }}</div>
+          <div style="font-size:8px;color:{{ colors[2] }};opacity:.7;">hit{{ 's' if stage.total != 1 else '' }}</div>
+          {% else %}
+          <div style="font-size:16px;color:var(--border);">—</div>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <!-- Technique breakdown per active stage -->
+    {% set active_stages = tactic_breakdown | selectattr('active') | list %}
+    {% if active_stages %}
+    <div style="margin-top:.75rem;padding-top:.75rem;border-top:0.5px solid var(--border);display:flex;flex-wrap:wrap;gap:4px;">
+      {% for stage in active_stages %}
+      {% set colors = stage_colors.get(stage.name, ('var(--border)', 'var(--bg2)', 'var(--text3)')) %}
+      {% for mid, cnt in stage.hits.items() %}
+      <span style="display:inline-flex;align-items:center;gap:3px;background:{{ colors[1] }};color:{{ colors[2] }};
+                   font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:4px;font-weight:500;border:0.5px solid {{ colors[0] }};">
+        {{ mid }}
+        <span style="background:{{ colors[0] }};color:{{ colors[1] }};border-radius:2px;padding:0 3px;font-size:8px;font-weight:700;">{{ cnt }}</span>
+      </span>
+      {% endfor %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── ATT&CK Techniques ── -->
+{% if mitre_counts %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header">
+    <span class="section-title">ATT&CK Techniques Detected</span>
+    <a href="/navigator/download" style="font-size:11px;color:var(--purple-text);">Navigator export ↓</a>
+  </div>
+  <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:1rem;display:flex;flex-wrap:wrap;gap:6px;">
+    <p style="width:100%;font-size:10.5px;color:var(--text3);margin:0 0 6px;">Click any technique to pivot — the Dashboard will filter to matching sessions.</p>
+    {% for mid, cnt in mitre_counts.items() %}
+    <a href="/?search={{ mid }}"
+       style="display:inline-flex;align-items:center;gap:4px;background:var(--purple-bg);color:var(--purple-text);
+              font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:4px;font-weight:500;
+              text-decoration:none;transition:filter .12s;"
+       onmouseover="this.style.filter='brightness(1.15)'"
+       onmouseout="this.style.filter=''"
+       title="Filter dashboard to sessions with {{ mid }}">
+      {{ mid }}
+      <span style="background:var(--purple-text);color:var(--purple-bg);border-radius:3px;padding:0 4px;font-size:9px;font-weight:700;">{{ cnt }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ── IOC Breakdown ── -->
+{% if unique_iocs %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header">
+    <span class="section-title">IOC Breakdown</span>
+    <a href="/iocs" style="font-size:11px;color:var(--purple-text);">View IOC Hub →</a>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:.5rem;">
+    {% for ioc_type, label, color in [('url','URLs','blue'), ('ip','IPs','red'), ('hash','Hashes','amber'), ('path','Paths','teal')] %}
+    <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:.75rem 1rem;">
+      <div style="font-size:10px;color:var(--{{ color }}-text);text-transform:uppercase;letter-spacing:.05em;font-weight:500;margin-bottom:3px;">{{ label }}</div>
+      <div style="font-size:22px;font-weight:600;color:var(--{{ color }});">{{ ioc_type_counts.get(ioc_type, 0) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <p style="font-size:11px;color:var(--text3);">
+    {{ unique_iocs }} unique indicator{{ 's' if unique_iocs != 1 else '' }} extracted across {{ stats.total }} session{{ 's' if stats.total != 1 else '' }}.
+  </p>
+</div>
+{% endif %}
+
+<!-- ── Campaigns ── -->
+{% if campaigns %}
+<div style="margin-bottom:1.5rem;">
+  <div class="section-header"><span class="section-title">Cross-host Campaigns</span></div>
+  {% for c in campaigns %}
+  <div class="campaign-card">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span class="badge {% if c.is_confirmed %}tier-p1{% else %}tier-p2{% endif %}">
+        {{ 'Confirmed' if c.is_confirmed else 'Tentative' }}
+      </span>
+      <span style="font-size:13px;font-weight:500;">Campaign <code style="font-size:12px">{{ c.campaign_id }}</code></span>
+      <span style="margin-left:auto;font-size:11px;color:var(--text3);">
+        {{ c.sessions | length }} sessions &nbsp;·&nbsp; {{ c.host_ids | length }} hosts &nbsp;·&nbsp; peak sev {{ c.peak_severity }}
+      </span>
+    </div>
+    {% if c.first_seen and c.last_seen %}
+    <div style="font-size:11px;color:var(--text3);">
+      {{ c.first_seen.strftime('%Y-%m-%d %H:%M') }} → {{ c.last_seen.strftime('%Y-%m-%d %H:%M') }}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+@media print {
+  .sidebar, .topbar { display: none !important; }
+  .shell { display: block; }
+  .main  { width: 100%; overflow: visible; }
+  .content { padding: .5rem; }
+  a { color: inherit !important; }
+}
+</style>
+{% endblock %}

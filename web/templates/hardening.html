@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block main %}
+<header class="topbar">
+  <span class="topbar-title">
+    EDR Policy Hardening
+    {% if has_triggered %}
+    <span style="font-size:12px;font-weight:400;color:var(--text3);margin-left:.5rem">
+      recommendations based on detected techniques
+      {% if filename %}&nbsp;·&nbsp; <span class="mono">{{ filename }}</span>{% endif %}
+    </span>
+    {% endif %}
+  </span>
+</header>
+
+<div class="content">
+{% if not has_triggered and not has_general %}
+<div class="empty-state">
+  <div style="font-size:28px;margin-bottom:.5rem">🛡</div>
+  <p>No analysis loaded — upload a log file on the <a href="/" style="color:var(--purple-text)">Dashboard</a> first.</p>
+</div>
+
+{% else %}
+<!-- ── EDR tab bar ── -->
+<div class="seg-tabs" style="margin-bottom:1.25rem;">
+  {% for edr in hardening %}
+  <button class="seg-tab edr-tab {% if loop.first %}active{% endif %}"
+          onclick="switchEDR(event,'{{ edr.slug }}')"
+          data-slug="{{ edr.slug }}">
+    <span style="width:7px;height:7px;border-radius:50%;background:{{ edr.color }};display:inline-block;margin-right:5px;vertical-align:middle;flex-shrink:0;"></span>
+    {{ edr.name }}
+  </button>
+  {% endfor %}
+</div>
+
+<!-- ── Per-EDR panels ── -->
+{% for edr in hardening %}
+<div id="edr-{{ edr.slug }}" class="edr-panel" {% if not loop.first %}style="display:none"{% endif %}>
+
+  {% if edr.triggered %}
+  <!-- Triggered recommendations -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:.75rem;">
+    <span style="font-size:13px;font-weight:500;">Triggered Recommendations</span>
+    <span style="font-size:11px;color:var(--text3);">Based on detected techniques in this analysis</span>
+    <span class="badge tier-p1" style="margin-left:auto;">{{ edr.triggered|length }} action{{ 's' if edr.triggered|length != 1 else '' }}</span>
+  </div>
+  {% for rec in edr.triggered %}
+  {% set pclass = {'critical':'tier-p1','high':'tier-p2','medium':'tier-p3','low':'tier-info'}[rec.priority] %}
+  <details class="rec-card" style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:8px;overflow:hidden;">
+    <summary style="display:flex;align-items:center;gap:8px;padding:.65rem 1rem;cursor:pointer;list-style:none;background:var(--bg);">
+      <span style="font-size:10px;transform:rotate(0deg);transition:.15s;display:inline-block" class="rec-arrow">▶</span>
+      <span class="badge {{ pclass }}">{{ rec.priority }}</span>
+      <span style="font-size:13px;font-weight:500;">{{ rec.title }}</span>
+      {% if rec.triggered_by %}
+      <span class="tech-tag" style="margin-left:auto;">{{ rec.triggered_by }}</span>
+      {% endif %}
+    </summary>
+    <div style="padding:.75rem 1rem;border-top:0.5px solid var(--border);">
+      <p style="font-size:12.5px;color:var(--text2);margin-bottom:.75rem;">{{ rec.description }}</p>
+      <ol style="margin:0;padding-left:1.25rem;font-size:12px;color:var(--text2);line-height:1.9;">
+        {% for step in rec.steps %}
+        <li>{{ step }}</li>
+        {% endfor %}
+      </ol>
+    </div>
+  </details>
+  {% endfor %}
+
+  <hr class="divider" style="margin:1.25rem 0;">
+  {% endif %}
+
+  <!-- General hardening -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:.75rem;">
+    <span style="font-size:13px;font-weight:500;">General Hardening</span>
+    <span style="font-size:11px;color:var(--text3);">Baseline security posture recommendations</span>
+  </div>
+  {% for rec in edr.general %}
+  {% set pclass = {'critical':'tier-p1','high':'tier-p2','medium':'tier-p3','low':'tier-info'}[rec.priority] %}
+  <details class="rec-card" style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:8px;overflow:hidden;">
+    <summary style="display:flex;align-items:center;gap:8px;padding:.65rem 1rem;cursor:pointer;list-style:none;background:var(--bg);">
+      <span style="font-size:10px;transition:.15s;display:inline-block" class="rec-arrow">▶</span>
+      <span class="badge {{ pclass }}">{{ rec.priority }}</span>
+      <span style="font-size:13px;font-weight:500;">{{ rec.title }}</span>
+    </summary>
+    <div style="padding:.75rem 1rem;border-top:0.5px solid var(--border);">
+      <p style="font-size:12.5px;color:var(--text2);margin-bottom:.75rem;">{{ rec.description }}</p>
+      <ol style="margin:0;padding-left:1.25rem;font-size:12px;color:var(--text2);line-height:1.9;">
+        {% for step in rec.steps %}
+        <li>{{ step }}</li>
+        {% endfor %}
+      </ol>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endfor %}
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchEDR(event, slug) {
+  document.querySelectorAll('.edr-panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.edr-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('edr-' + slug).style.display = 'block';
+  event.currentTarget.classList.add('active');
+}
+
+document.querySelectorAll('details.rec-card').forEach(d => {
+  d.addEventListener('toggle', () => {
+    const arrow = d.querySelector('.rec-arrow');
+    if (arrow) arrow.style.transform = d.open ? 'rotate(90deg)' : 'rotate(0deg)';
+  });
+});
+</script>
+{% endblock %}

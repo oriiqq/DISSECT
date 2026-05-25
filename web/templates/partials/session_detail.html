@@ -1,0 +1,709 @@
+{% set beacon_hit    = 1 if (session.beacon_profile and session.beacon_profile.is_beacon) else 0 %}
+{% set cred_count    = session_creds | length if session_creds else 0 %}
+{% set logon_count   = session_logons | length if session_logons else 0 %}
+{% set threat_count  = beacon_hit
+                     + (session.ti_hits|length if session.ti_hits else 0)
+                     + (session.lateral_moves|length if session.lateral_moves else 0)
+                     + (1 if cred_count > 0 else 0)
+                     + (1 if logon_count > 0 else 0) %}
+
+<div class="detail-panel" style="padding:0;margin:0;border:none;border-radius:0;background:transparent;box-shadow:none;">
+
+  <!-- ── Header ── -->
+  <div style="padding:1rem 1.25rem .6rem">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem">
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+          <span class="badge {{ tier_cls(session.alert_tier) }}">{{ session.alert_tier }}</span>
+          <h3 style="margin:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            {{ session.host_id }} · PID {{ session.process_id }}
+          </h3>
+        </div>
+        <div class="meta-row">
+          <span class="meta-item"><strong>Score</strong>
+            <span style="display:inline-flex;align-items:center;gap:3px;">
+              {{ session.weighted_score | round | int }}/100
+              <button onclick="toggleEl('score-bd-{{ session.session_id }}')"
+                      style="font-size:9px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0 2px;line-height:1;"
+                      title="Show score breakdown">▾ why?</button>
+            </span>
+          </span>
+          <span class="meta-item"><strong>Host</strong> <code class="mono">{{ session.host_id }}</code></span>
+          <span class="meta-item"><strong>PID</strong> {{ session.process_id }}</span>
+          {% if session.parent_process %}
+          <span class="meta-item"><strong>Parent</strong> <code class="mono">{{ session.parent_process }}</code></span>
+          {% endif %}
+          <span class="meta-item"><strong>Blocks</strong> {{ session.blocks|length }}</span>
+          <span class="meta-item"><strong>Tempo</strong> {{ session.tempo.value.replace('_',' ') }}</span>
+          {% if session.deobfuscation_passes %}
+          <span class="meta-item"><strong>Deobf</strong> {{ session.deobfuscation_passes }} block{{ 's' if session.deobfuscation_passes != 1 else '' }}</span>
+          {% endif %}
+          {% if session.campaign_id %}
+          <span class="meta-item"><strong>Campaign</strong> <code class="mono">{{ session.campaign_id }}</code></span>
+          {% endif %}
+          {% if triage and triage.status and triage.status != 'unreviewed' %}
+          <span class="meta-item">
+            <span style="padding:1px 8px;border-radius:99px;font-size:10px;font-weight:600;
+              {% if triage.status == 'confirmed' %}background:var(--red-bg);color:var(--red-text)
+              {% elif triage.status == 'false_positive' %}background:var(--teal-bg);color:var(--teal-text)
+              {% elif triage.status == 'escalated' %}background:var(--amber-bg);color:var(--amber-text)
+              {% else %}background:var(--blue-bg);color:var(--blue-text){% endif %}">
+              {{ triage.status.replace('_',' ').title() }}
+            </span>
+          </span>
+          {% endif %}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;padding-top:2px;align-items:center;flex-wrap:wrap">
+        <div class="v1-nav-arrows">
+          <button class="btn btn-sm v1-nav-btn" onclick="moveRowSelection(-1)" title="Previous session (k)">◀</button>
+          <button class="btn btn-sm v1-nav-btn" onclick="moveRowSelection(1)"  title="Next session (j)">▶</button>
+        </div>
+        <span style="width:1px;height:16px;background:var(--border);display:inline-block;"></span>
+        <a href="/sessions/{{ session.session_id }}/export" class="btn btn-sm" title="Export evidence ZIP">⬇ ZIP</a>
+        <a href="/sigma/download" class="btn btn-sm">⬇ Sigma</a>
+        <a href="/report/download" class="btn btn-sm">⬇ Report</a>
+      </div>
+    </div>
+
+    <!-- Score breakdown (hidden by default) -->
+    <div id="score-bd-{{ session.session_id }}" style="display:none;margin-top:.6rem;padding:.6rem .75rem;
+         background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);font-size:11px;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);margin-bottom:.4rem;">
+        Score Breakdown
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:.4rem;">
+        <span style="background:var(--card);border:0.5px solid var(--border);padding:3px 8px;border-radius:var(--radius);">
+          Max block: <strong>{{ score_breakdown.max_block_score }}</strong>
+        </span>
+        <span style="background:var(--card);border:0.5px solid var(--border);padding:3px 8px;border-radius:var(--radius);">
+          Base (×0.4): <strong>{{ score_breakdown.base }}</strong>
+        </span>
+        <span style="background:var(--card);border:0.5px solid var(--border);padding:3px 8px;border-radius:var(--radius);">
+          Weighted avg (×0.6): <strong>{{ score_breakdown.weighted }}</strong>
+        </span>
+        {% if score_breakdown.tempo > 0 %}
+        <span style="background:var(--amber-bg);color:var(--amber-text);border:0.5px solid var(--amber);padding:3px 8px;border-radius:var(--radius);">
+          Operator tempo: <strong>+{{ score_breakdown.tempo }}</strong>
+        </span>
+        {% endif %}
+      </div>
+      {% if score_breakdown.chains %}
+      <div style="font-size:10px;font-weight:600;color:var(--text3);margin-bottom:3px;">Chain bonuses:</div>
+      {% for name, pts in score_breakdown.chains %}
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+        <span style="background:var(--red-bg);color:var(--red-text);padding:0 5px;border-radius:3px;font-weight:700;font-size:10px;">+{{ pts }}</span>
+        <span style="color:var(--text2);">{{ name }}</span>
+      </div>
+      {% endfor %}
+      {% endif %}
+      <div style="margin-top:.4rem;border-top:0.5px solid var(--border);padding-top:.4rem;font-weight:700;color:var(--text);">
+        Total: {{ score_breakdown.total }}/100
+        {% if score_breakdown.total >= 100 %}<span style="color:var(--text3);font-size:10px;font-weight:400;"> (capped at 100)</span>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tab bar ── -->
+  <div class="detail-tabs">
+    <button class="detail-tab-btn active" onclick="switchTab(this,'tab-overview')">Overview</button>
+    <button class="detail-tab-btn" onclick="switchTab(this,'tab-threats')">
+      Threats{% if threat_count > 0 %}<span class="tab-badge">{{ threat_count }}</span>{% endif %}
+    </button>
+    <button class="detail-tab-btn" onclick="switchTab(this,'tab-rules')">
+      Rules{% if bundle.rules %}<span class="tab-badge" style="background:var(--blue-bg);color:var(--blue-text);">{{ bundle.rules|length }}</span>{% endif %}
+    </button>
+    <button class="detail-tab-btn" onclick="switchTab(this,'tab-code')">
+      Code<span class="tab-badge" style="background:var(--teal-bg);color:var(--teal-text);">{{ session.blocks|length }}</span>
+    </button>
+    <button class="detail-tab-btn" onclick="switchTab(this,'tab-triage')">
+      Triage{% if triage and triage.status and triage.status != 'unreviewed' %}<span class="tab-badge" style="background:var(--accent-bg);color:var(--accent-text);">!</span>{% endif %}
+    </button>
+  </div>
+
+  <!-- ═══════════════════ Tab: Overview ═══════════════════ -->
+  <div class="tab-pane active" id="tab-overview">
+
+    {% if session.technique_set %}
+    {% set EXEC_TECHS    = ['EXEC_POLICY_BYPASS','IEX_EXEC','REFLECTIVE_INJECT','SHELLCODE_MARSHAL','PROC_HOLLOW','PROC_INJECT_OPENPROC','LOLBIN_CERTUTIL','LOLBIN_MSHTA','LOLBIN_REGSVR32','LOLBIN_RUNDLL32','LOLBIN_BITSADMIN'] %}
+    {% set EVASION_TECHS = ['AMSI_BYPASS_REFLECT','AMSI_BYPASS_COM','AMSI_BYPASS_PATCH','AMSI_FORCE_DISABLE','ETW_BYPASS','ETW_PATCH_INLINE','ETW_PROVIDER_DISABLE','AV_EXCLUSION','CLM_BYPASS','ENCODED_CMD','HIGH_ENTROPY_BLOB'] %}
+    {% set PERSIST_TECHS = ['WMI_PERSIST','SCHTASK_CREATE','SCHTASK_HIJACK','REG_PERSIST'] %}
+    {% set CRED_TECHS    = ['CRED_HARVEST','KERBEROAST_SPN','ASREPROAST','DPAPI_DECRYPT','SAM_DUMP','DCSYNC_PATTERN','LSASS_READ'] %}
+    {% set LAT_TECHS     = ['WMIC_REMOTE_EXEC','LATERAL_PSREMOTING','LATERAL_INVOKE_CMD','LATERAL_WMI_EXEC','COM_LATERAL'] %}
+    {% set C2_TECHS      = ['DOWNLOAD_CRADLE_WC','DOWNLOAD_CRADLE_BITS','DOWNLOAD_CRADLE_IWR','COBALT_STRIKE','REVERSE_SHELL'] %}
+    {% set kc_stages = [
+      ('Execution',    EXEC_TECHS,    'var(--blue)',   'var(--blue-bg)',   'var(--blue-text)'),
+      ('Def. Evasion', EVASION_TECHS, 'var(--amber)',  'var(--amber-bg)',  'var(--amber-text)'),
+      ('Persistence',  PERSIST_TECHS, 'var(--teal)',   'var(--teal-bg)',   'var(--teal-text)'),
+      ('Cred. Access', CRED_TECHS,    'var(--red)',    'var(--red-bg)',    'var(--red-text)'),
+      ('Lateral Mvmt', LAT_TECHS,     'var(--purple)', 'var(--purple-bg)', 'var(--purple-text)'),
+      ('C2',           C2_TECHS,      'var(--red)',    'var(--red-bg)',    'var(--red-text)'),
+    ] %}
+    <div style="margin-bottom:.9rem;">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:.4rem;">Kill-Chain</div>
+      <div style="display:flex;gap:3px;flex-wrap:nowrap;overflow-x:auto;">
+        {% for stage_name, stage_techs, color, bg, text_c in kc_stages %}
+        {% set hit = session.technique_set | has_any(stage_techs) %}
+        <div style="flex:1;min-width:60px;padding:5px 6px;border-radius:var(--radius);text-align:center;
+                    background:{% if hit %}{{ bg }}{% else %}var(--bg2){% endif %};
+                    border:0.5px solid {% if hit %}{{ color }}{% else %}var(--border){% endif %};">
+          <div style="font-size:8px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
+                      color:{% if hit %}{{ text_c }}{% else %}var(--text3){% endif %};margin-bottom:3px;white-space:nowrap;">
+            {{ stage_name }}
+          </div>
+          <div style="font-size:15px;line-height:1;">
+            {% if hit %}<span style="color:{{ color }};">●</span>{% else %}<span style="color:var(--border);">○</span>{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div style="margin-bottom:.5rem;">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:.4rem;">
+        Techniques ({{ session.technique_set | length }})
+      </div>
+      <div>
+        {% for t in session.technique_set | sort %}
+          <span class="tech-tag" style="font-size:11px;padding:3px 8px;cursor:pointer;"
+                onclick="v1PivotTechnique('{{ t }}')" title="Find all sessions using {{ t }}">{{ t }}</span>
+        {% endfor %}
+      </div>
+      <div style="font-size:10px;color:var(--text3);margin-top:.4rem;">Click a technique to pivot — find all sessions using it.</div>
+    </div>
+    {% else %}
+    <div class="select-state" style="min-height:180px;">
+      <svg style="width:36px;height:36px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
+      </svg>
+      <div style="font-size:13px;font-weight:500;margin-bottom:.3rem;">No techniques detected</div>
+      <div style="font-size:11.5px;">This session had no matched detection rules.</div>
+    </div>
+    {% endif %}
+
+  </div><!-- /tab-overview -->
+
+  <!-- ═══════════════════ Tab: Threats ═══════════════════ -->
+  <div class="tab-pane" id="tab-threats">
+
+    {% if not (session.beacon_profile and session.beacon_profile.is_beacon)
+         and not session.ti_hits and not session.lateral_moves
+         and not session.iocs and not session_creds and not session_logons %}
+    <div class="select-state" style="min-height:220px;">
+      <svg style="width:36px;height:36px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <div style="font-size:13px;font-weight:500;margin-bottom:.3rem;">No threat signals</div>
+      <div style="font-size:11.5px;">No beacon, TI matches, lateral movement, credentials, or IOCs detected.</div>
+    </div>
+    {% endif %}
+
+    <!-- ── Extracted Plaintext Credentials ── -->
+    {% if session_creds %}
+    <div style="background:var(--red-bg);border:2px solid var(--red);border-radius:var(--radius);
+                padding:.65rem .9rem;margin-bottom:.75rem;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px;">
+        <svg style="width:14px;height:14px;fill:none;stroke:var(--red);stroke-width:2;flex-shrink:0;" viewBox="0 0 24 24">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        <span style="font-size:12px;font-weight:700;color:var(--red-text);">
+          PLAINTEXT CREDENTIALS EXTRACTED ({{ session_creds|length }})
+        </span>
+        <span style="margin-left:auto;font-size:9px;background:var(--red);color:#fff;padding:1px 6px;border-radius:3px;font-weight:700;">HIGH SEVERITY</span>
+      </div>
+      {% for cred in session_creds %}
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 0;
+                  border-bottom:{% if not loop.last %}0.5px solid rgba(239,68,68,.2){% else %}none{% endif %};">
+        <code class="mono" style="color:var(--red-text);font-size:12px;font-weight:600;flex:1;word-break:break-all;">{{ cred.value }}</code>
+        <button onclick="copyText({{ cred.value | tojson }}, 'Credential')"
+                class="btn btn-sm" style="font-size:9px;flex-shrink:0;">Copy</button>
+        <span style="color:var(--text3);font-size:10px;flex-shrink:0;font-family:var(--mono);">
+          {{ cred.timestamp[11:19] if cred.timestamp else '—' }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- ── Beacon Profile ── -->
+    {% if session.beacon_profile and session.beacon_profile.is_beacon %}
+    {% set bp = session.beacon_profile %}
+    <div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius);
+                padding:.6rem .9rem;margin-bottom:.75rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <svg style="width:16px;height:16px;fill:none;stroke:var(--amber);stroke-width:2;stroke-linecap:round;flex-shrink:0;"
+           viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M20.07 4.93a10 10 0 0 1 0 14.14M3.93 19.07a10 10 0 0 1 0-14.14"/></svg>
+      <div>
+        <span style="font-size:12px;font-weight:600;color:var(--amber-text);">C2 Beacon Pattern Detected</span>
+        <div style="font-size:11px;color:var(--amber-text);opacity:.85;margin-top:1px;">
+          Period: <strong>{{ bp.period_seconds }}s</strong>&nbsp;·&nbsp;
+          Jitter: <strong>{{ (bp.jitter_pct * 100) | round(1) }}%</strong>&nbsp;·&nbsp;
+          Confidence: <strong>{{ (bp.confidence * 100) | round(0) | int }}%</strong>&nbsp;·&nbsp;
+          Samples: {{ bp.sample_count }}
+          {% if bp.framework_hint %}&nbsp;·&nbsp; Likely: <strong>{{ bp.framework_hint.replace('_', ' ').title() }}</strong>{% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── TI Hits ── -->
+    {% if session.ti_hits %}
+    <div style="background:var(--red-bg);border:1px solid var(--red);border-radius:var(--radius);
+                padding:.6rem .9rem;margin-bottom:.75rem;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <svg style="width:14px;height:14px;fill:none;stroke:var(--red);stroke-width:2;" viewBox="0 0 24 24">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span style="font-size:12px;font-weight:600;color:var(--red-text);">
+          Threat Intelligence Matches ({{ session.ti_hits|length }})
+        </span>
+      </div>
+      {% for hit in session.ti_hits %}
+      <div style="padding:4px 0;border-bottom:{% if not loop.last %}0.5px solid rgba(239,68,68,.15){% else %}none{% endif %};">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;font-size:11px;">
+          <span class="badge tier-p1" style="font-size:9px;">{{ hit.source }}</span>
+          <code class="mono" style="font-size:10.5px;color:var(--red-text);flex:1;word-break:break-all;">
+            {{ hit.ioc_value[:70] }}{% if hit.ioc_value|length > 70 %}…{% endif %}
+          </code>
+          <button onclick="copyText({{ hit.ioc_value | tojson }}, 'IOC')" class="btn btn-sm" style="font-size:9px;flex-shrink:0;">Copy</button>
+          <span style="color:var(--text3);flex-shrink:0;">{{ hit.confidence }}% conf</span>
+        </div>
+        {% if hit.malware_name or hit.threat_type or hit.tags %}
+        <div style="font-size:10.5px;color:var(--text2);padding-left:4px;display:flex;gap:8px;flex-wrap:wrap;">
+          {% if hit.malware_name %}<span>→ <strong>{{ hit.malware_name }}</strong></span>{% endif %}
+          {% if hit.threat_type %}<span style="color:var(--text3);">{{ hit.threat_type }}</span>{% endif %}
+          {% if hit.first_seen %}<span style="color:var(--text3);">first seen {{ hit.first_seen[:10] }}</span>{% endif %}
+          {% for tag in hit.tags[:4] %}<span style="background:var(--bg3);padding:0 5px;border-radius:3px;font-size:10px;">{{ tag }}</span>{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- ── Lateral Moves ── -->
+    {% if session.lateral_moves %}
+    <div style="background:var(--purple-bg);border:1px solid var(--accent);border-radius:var(--radius);
+                padding:.6rem .9rem;margin-bottom:.75rem;">
+      <div style="font-size:12px;font-weight:600;color:var(--accent-text);margin-bottom:6px;">
+        Lateral Movement Detected ({{ session.lateral_moves|length }} hop{{ 's' if session.lateral_moves|length != 1 else '' }})
+      </div>
+      {% for move in session.lateral_moves %}
+      <div style="font-size:11px;margin-bottom:4px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <code class="mono">{{ move.source_host }}</code>
+        <span style="color:var(--red);font-size:14px;font-weight:700;">→</span>
+        <code class="mono">{{ move.target_host }}</code>
+        <span class="badge tier-p2" style="font-size:9px;">{{ move.evidence }}</span>
+        <code class="mono" style="font-size:10px;color:var(--text3);">{{ move.mitre_id }}</code>
+        {% if move.timestamp %}
+        <span style="color:var(--text3);font-size:10px;margin-left:auto;font-family:var(--mono);">
+          {{ move.timestamp.strftime('%H:%M:%S') }}
+        </span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- ── Logon Events ── -->
+    {% if session_logons %}
+    <div style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:var(--radius);
+                padding:.6rem .9rem;margin-bottom:.75rem;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <svg style="width:14px;height:14px;fill:none;stroke:var(--blue);stroke-width:2;flex-shrink:0;" viewBox="0 0 24 24">
+          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+          <polyline points="10 17 15 12 10 7"/>
+          <line x1="15" y1="12" x2="3" y2="12"/>
+        </svg>
+        <span style="font-size:12px;font-weight:600;color:var(--blue-text);">
+          Logon Events in Session Window ±5 min ({{ session_logons|length }})
+        </span>
+      </div>
+      <div style="font-family:var(--mono);font-size:10.5px;">
+        {% for le in session_logons %}
+        <div style="display:flex;align-items:center;gap:6px;padding:2px 0;
+                    border-bottom:{% if not loop.last %}0.5px solid rgba(37,99,235,.12){% else %}none{% endif %};">
+          <span class="badge {% if not le.success %}tier-p1{% elif le.event_id == 4648 %}tier-p2{% else %}tier-p3{% endif %}"
+                style="font-size:9px;min-width:32px;text-align:center;">{{ le.event_id }}</span>
+          <span style="color:var(--text3);min-width:58px;">{{ le.timestamp.strftime('%H:%M:%S') if le.timestamp else '—' }}</span>
+          <span style="color:var(--text2);min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ le.username or '—' }}</span>
+          {% if le.source_ip and le.source_ip not in ('-', '::1', '127.0.0.1') %}
+          <span style="color:var(--text3);">from {{ le.source_ip }}</span>
+          {% endif %}
+          <span style="color:var(--text3);">type {{ le.logon_type }}</span>
+          {% if not le.success %}
+          <span style="color:var(--red-text);font-weight:700;margin-left:auto;">FAILED</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ── IOCs ── -->
+    {% if session.iocs %}
+    <div>
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:.4rem;">
+        Extracted IOCs ({{ session.iocs|length }})
+        <button onclick="v1PivotIOC()"
+                style="font-size:9px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0 4px;margin-left:4px;"
+                title="Find all sessions sharing these IOCs">pivot ↗</button>
+      </div>
+      <div style="margin-bottom:.5rem;">
+        {% for ioc in session.iocs[:30] %}
+          <span class="ioc-chip" onclick="copyText({{ ioc | tojson }}, 'IOC')" style="cursor:pointer" title="Click to copy">{{ ioc }}</span>
+        {% endfor %}
+        {% if session.iocs|length > 30 %}
+          <span class="muted" style="font-size:11px">&nbsp;+ {{ session.iocs|length - 30 }} more</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+  </div><!-- /tab-threats -->
+
+  <!-- ═══════════════════ Tab: Rules ═══════════════════ -->
+  <div class="tab-pane" id="tab-rules">
+
+    {% if bundle.rules %}
+    <div>
+      {% for rule in bundle.rules %}
+      <div class="sigma-rule-card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span class="badge {{ sev_cls(rule.level) }}">{{ rule.level }}</span>
+          <span class="rule-title">{{ rule.title }}</span>
+        </div>
+        <div class="rule-meta">
+          ID: <code>{{ rule.rule_id[:8] }}…</code>
+          &nbsp;·&nbsp; MITRE: <code>{{ rule.mitre_id }}</code>
+          &nbsp;·&nbsp; Tags: {{ rule.tags | join(', ') }}
+        </div>
+        <details>
+          <summary style="font-size:11px;color:var(--purple-text);cursor:pointer;user-select:none">View YAML</summary>
+          <div class="code-wrap" style="margin-top:6px">
+            <pre class="code-block"><code class="language-yaml">{{ rule.to_yaml() }}</code></pre>
+            <button class="code-copy" onclick="copyText({{ rule.to_yaml() | tojson }}, 'Sigma rule')">Copy</button>
+          </div>
+        </details>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="select-state" style="min-height:220px;">
+      <svg style="width:36px;height:36px;fill:none;stroke:var(--border);stroke-width:1.5;margin-bottom:.75rem" viewBox="0 0 24 24">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+      </svg>
+      <div style="font-size:13px;font-weight:500;margin-bottom:.3rem;">No Sigma rules generated</div>
+      <div style="font-size:11.5px;">No findings above threshold in this session.</div>
+    </div>
+    {% endif %}
+
+  </div><!-- /tab-rules -->
+
+  <!-- ═══════════════════ Tab: Code ═══════════════════ -->
+  <div class="tab-pane" id="tab-code">
+
+    <!-- Process Tree -->
+    {% if session.process_tree %}
+    <div style="margin-bottom:1rem;">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:.4rem;">
+        Process Tree ({{ session.process_tree | length }} events)
+      </div>
+      <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius);
+                  padding:.6rem .8rem;font-family:var(--mono);font-size:10.5px;max-height:220px;overflow-y:auto;">
+        {% for pe in session.process_tree[:30] %}
+        <div style="display:flex;align-items:center;gap:4px;padding:2px 0;flex-wrap:wrap;
+                    border-bottom:{% if not loop.last %}0.5px solid var(--border2){% else %}none{% endif %};">
+          <span style="color:var(--text3);min-width:60px;flex-shrink:0;font-size:9.5px;">
+            {{ pe.timestamp.strftime('%H:%M:%S') if pe.timestamp else '—' }}
+          </span>
+          <span style="color:var(--text3);min-width:28px;flex-shrink:0;font-size:9px;">{{ pe.event_id }}</span>
+          {% if pe.parent_name %}
+          <span style="color:var(--accent);flex-shrink:0;font-size:10px;">{{ pe.parent_name[:18] }}
+            <span style="color:var(--text3);"> → </span>
+          </span>
+          {% endif %}
+          <span style="color:var(--text);font-weight:600;flex-shrink:0;">{{ pe.process_name[:22] }}</span>
+          {% if pe.user %}
+          <span style="font-size:9px;padding:0 5px;border-radius:3px;flex-shrink:0;
+                       background:var(--blue-bg);color:var(--blue-text);">{{ pe.user[:24] }}</span>
+          {% endif %}
+          {% if pe.integrity %}
+          <span style="font-size:9px;padding:0 5px;border-radius:3px;flex-shrink:0;
+                       {% if pe.integrity in ('High','System') %}background:var(--red-bg);color:var(--red-text)
+                       {% else %}background:var(--gray-bg);color:var(--gray-text){% endif %}">
+            {{ pe.integrity }}
+          </span>
+          {% endif %}
+          {% if pe.command_line %}
+          <span style="color:var(--text3);font-size:9.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;">
+            {{ pe.command_line[:90] }}{% if pe.command_line | length > 90 %}…{% endif %}
+          </span>
+          {% endif %}
+        </div>
+        {% endfor %}
+        {% if session.process_tree | length > 30 %}
+        <div style="color:var(--text3);font-size:10px;padding-top:4px;">
+          + {{ session.process_tree | length - 30 }} more events
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Script Blocks -->
+    <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:.5rem;">
+      Script Blocks ({{ session.blocks|length }})
+    </div>
+    {% for block in session.blocks %}
+    <div style="margin-bottom:8px;background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius);padding:.6rem .8rem">
+
+      <!-- Block header -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap;">
+        <span style="font-size:10px;font-weight:500;padding:1px 6px;border-radius:4px;
+               {% if block.severity >= 80 %}background:var(--red-bg);color:var(--red-text)
+               {% elif block.severity >= 60 %}background:var(--amber-bg);color:var(--amber-text)
+               {% elif block.severity > 0 %}background:var(--teal-bg);color:var(--teal-text)
+               {% else %}background:var(--gray-bg);color:var(--gray-text){% endif %}">
+          sev {{ block.severity }}
+        </span>
+        <span class="mono muted" style="font-size:10.5px">{{ block.timestamp.strftime('%H:%M:%S') if block.timestamp }}</span>
+        <span class="mono muted" style="font-size:10.5px">H={{ "%.2f"|format(block.entropy) }}</span>
+        {% if block.path %}
+          <span class="muted" style="font-size:10px;overflow:hidden;text-overflow:ellipsis;max-width:200px;white-space:nowrap;">{{ block.path[-50:] }}</span>
+        {% endif %}
+        {% if block.raw_text != block.decoded_text %}
+        <div style="margin-left:auto;display:flex;gap:3px;">
+          <button class="v1-diff-btn active" data-view="decoded" data-idx="{{ loop.index }}"
+                  onclick="v1SetBlockView({{ loop.index }},'decoded')"
+                  style="font-size:9px;padding:1px 7px;border:1px solid var(--border);border-radius:3px;background:var(--accent-bg);color:var(--accent-text);cursor:pointer;">Decoded</button>
+          <button class="v1-diff-btn" data-view="raw" data-idx="{{ loop.index }}"
+                  onclick="v1SetBlockView({{ loop.index }},'raw')"
+                  style="font-size:9px;padding:1px 7px;border:1px solid var(--border);border-radius:3px;background:transparent;color:var(--text3);cursor:pointer;">Raw</button>
+          <button class="v1-diff-btn" data-view="diff" data-idx="{{ loop.index }}"
+                  onclick="v1SetBlockView({{ loop.index }},'diff')"
+                  style="font-size:9px;padding:1px 7px;border:1px solid var(--border);border-radius:3px;background:transparent;color:var(--text3);cursor:pointer;">Side-by-side</button>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Finding badges with evidence drawers -->
+      {% if block.findings %}
+      <div style="margin-bottom:6px">
+        {% for f in block.findings %}
+        <details style="display:inline-block;margin:0 3px 3px 0;vertical-align:top;">
+          <summary style="cursor:pointer;list-style:none;outline:none;">
+            <span class="badge {% if f.severity >= 80 %}sev-critical{% elif f.severity >= 60 %}sev-high{% elif f.severity >= 40 %}sev-medium{% else %}sev-low{% endif %}"
+                  style="cursor:pointer;user-select:none;">
+              {{ f.technique_id }}
+              <span style="font-size:8px;opacity:.7;">▾</span>
+            </span>
+          </summary>
+          <div style="background:var(--card);border:0.5px solid var(--border);border-radius:var(--radius);
+                      padding:.5rem .65rem;margin-top:2px;font-size:10.5px;min-width:260px;max-width:420px;z-index:10;position:relative;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:.35rem;">
+              <code style="font-size:10px;color:var(--purple-text);">{{ f.mitre_id }}</code>
+              <span style="color:var(--text3);">·</span>
+              <span style="color:var(--text3);">{{ f.rule_name }}</span>
+              <span style="margin-left:auto;font-size:9px;color:var(--text3);">{{ (f.confidence * 100) | round | int }}% conf</span>
+            </div>
+            {% if f.matched_text %}
+            <div style="margin-bottom:.3rem;">
+              <span style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Matched:</span>
+              <div class="code-wrap" style="margin-top:2px;">
+                <pre style="margin:0;padding:4px 6px;font-size:10px;font-family:var(--mono);background:var(--bg);border:0.5px solid var(--border);border-radius:3px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:60px;">{{ f.matched_text }}</pre>
+                <button class="code-copy" onclick="copyText({{ f.matched_text | tojson }}, 'Evidence')">Copy</button>
+              </div>
+            </div>
+            {% endif %}
+            {% if f.context and f.context != f.matched_text %}
+            <div>
+              <span style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Context:</span>
+              <pre style="margin:2px 0 0;padding:4px 6px;font-size:10px;font-family:var(--mono);background:var(--bg);border:0.5px solid var(--border);border-radius:3px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;max-height:60px;color:var(--text3);">{{ f.context }}</pre>
+            </div>
+            {% endif %}
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Decoded view -->
+      <div id="blk-decoded-{{ loop.index }}" class="code-wrap">
+        <pre class="code-block" style="max-height:160px;font-size:11px"><code class="language-powershell">{{ block.decoded_text[:800] }}{% if block.decoded_text|length > 800 %}…{% endif %}</code></pre>
+        <button class="code-copy" onclick="copyText({{ block.decoded_text | tojson }}, 'Script block')">Copy</button>
+      </div>
+
+      <!-- Raw view (hidden by default if different from decoded) -->
+      {% if block.raw_text != block.decoded_text %}
+      <div id="blk-raw-{{ loop.index }}" class="code-wrap" style="display:none;">
+        <pre class="code-block" style="max-height:160px;font-size:10.5px"><code class="language-powershell">{{ block.raw_text[:500] }}{% if block.raw_text|length > 500 %}…{% endif %}</code></pre>
+        <button class="code-copy" onclick="copyText({{ block.raw_text | tojson }}, 'Raw script')">Copy</button>
+      </div>
+
+      <!-- Side-by-side diff view (hidden by default) -->
+      <div id="blk-diff-{{ loop.index }}" style="display:none;display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+        <div class="code-wrap" style="position:relative;">
+          <div style="font-size:9px;color:var(--text3);padding:2px 6px;background:var(--bg2);border-radius:3px 3px 0 0;border:0.5px solid var(--border);border-bottom:none;font-weight:600;">RAW (obfuscated)</div>
+          <pre class="code-block" style="border-radius:0 0 3px 3px;max-height:180px;font-size:10px;"><code class="language-powershell">{{ block.raw_text[:500] }}</code></pre>
+          <button class="code-copy" onclick="copyText({{ block.raw_text | tojson }}, 'Raw script')">Copy</button>
+        </div>
+        <div class="code-wrap" style="position:relative;">
+          <div style="font-size:9px;color:var(--teal-text);padding:2px 6px;background:var(--teal-bg);border-radius:3px 3px 0 0;border:0.5px solid var(--teal);border-bottom:none;font-weight:600;">DECODED (deobfuscated)</div>
+          <pre class="code-block" style="border-radius:0 0 3px 3px;max-height:180px;font-size:10px;"><code class="language-powershell">{{ block.decoded_text[:800] }}</code></pre>
+          <button class="code-copy" onclick="copyText({{ block.decoded_text | tojson }}, 'Decoded script')">Copy</button>
+        </div>
+      </div>
+      {% else %}
+      <!-- No raw view needed - blocks are identical -->
+      {% endif %}
+
+    </div>
+    {% endfor %}
+
+  </div><!-- /tab-code -->
+
+  <!-- ═══════════════════ Tab: Triage ═══════════════════ -->
+  <div class="tab-pane" id="tab-triage">
+
+    <div style="max-width:560px;">
+
+      <!-- Status -->
+      <div style="margin-bottom:.9rem;">
+        <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);display:block;margin-bottom:.35rem;">
+          Investigation Status
+        </label>
+        <select id="triage-status-{{ session.session_id }}"
+                style="width:100%;padding:7px 10px;font-size:13px;border:1px solid var(--border);
+                       border-radius:var(--radius);background:var(--card);color:var(--text);
+                       outline:none;cursor:pointer;">
+          <option value="unreviewed"    {% if triage.status == 'unreviewed'    %}selected{% endif %}>Unreviewed</option>
+          <option value="investigating" {% if triage.status == 'investigating' %}selected{% endif %}>Investigating</option>
+          <option value="confirmed"     {% if triage.status == 'confirmed'     %}selected{% endif %}>Confirmed Incident</option>
+          <option value="false_positive"{% if triage.status == 'false_positive'%}selected{% endif %}>False Positive</option>
+          <option value="escalated"     {% if triage.status == 'escalated'     %}selected{% endif %}>Escalated</option>
+        </select>
+      </div>
+
+      <!-- Notes -->
+      <div style="margin-bottom:.9rem;">
+        <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);display:block;margin-bottom:.35rem;">
+          Analyst Notes
+        </label>
+        <textarea id="triage-notes-{{ session.session_id }}"
+                  rows="9"
+                  placeholder="Document your findings: affected accounts, systems, recommended actions, escalation notes, remediation steps…"
+                  style="width:100%;padding:8px 10px;font-size:12px;font-family:var(--mono);border:1px solid var(--border);
+                         border-radius:var(--radius);background:var(--card);color:var(--text);resize:vertical;
+                         outline:none;box-sizing:border-box;line-height:1.5;">{{ triage.notes if triage.notes else '' }}</textarea>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <button onclick="v1SaveTriage('{{ session.session_id }}')"
+                class="btn" style="font-size:12px;padding:6px 16px;">
+          Save Notes
+        </button>
+        <a href="/sessions/{{ session.session_id }}/export"
+           class="btn btn-sm" style="font-size:12px;padding:6px 14px;">
+          ⬇ Export Evidence ZIP
+        </a>
+        <span id="triage-saved-{{ session.session_id }}"
+              style="font-size:10.5px;color:var(--text3);"></span>
+      </div>
+
+      {% if triage.ts %}
+      <div style="margin-top:.75rem;font-size:10.5px;color:var(--text3);">
+        Last saved: {{ triage.ts[:19].replace('T',' ') }} UTC
+      </div>
+      {% endif %}
+
+      <!-- Quick reference context -->
+      <div style="margin-top:1.25rem;padding:.75rem;background:var(--bg2);border:0.5px solid var(--border);
+                  border-radius:var(--radius);font-size:11px;color:var(--text2);">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);margin-bottom:.4rem;">Session Reference</div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-family:var(--mono);">
+          <span style="color:var(--text3);">Session ID</span><span>{{ session.session_id }}</span>
+          <span style="color:var(--text3);">Host</span><span>{{ session.host_id }}</span>
+          <span style="color:var(--text3);">PID</span><span>{{ session.process_id }}</span>
+          <span style="color:var(--text3);">Score</span><span>{{ session.weighted_score | round | int }}/100</span>
+          <span style="color:var(--text3);">Start</span><span>{{ session.start_time.strftime('%Y-%m-%d %H:%M:%S') if session.start_time else '—' }}</span>
+          <span style="color:var(--text3);">Techniques</span><span>{{ session.technique_set | length }}</span>
+          <span style="color:var(--text3);">IOCs</span><span>{{ session.iocs | length }}</span>
+        </div>
+      </div>
+
+    </div>
+
+  </div><!-- /tab-triage -->
+
+</div><!-- /detail-panel -->
+
+<script>
+function switchTab(btn, tab) {
+  btn.closest('.detail-panel').querySelectorAll('.detail-tab-btn').forEach(b => b.classList.remove('active'));
+  btn.closest('.detail-panel').querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(tab).classList.add('active');
+}
+
+function toggleEl(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = (el.style.display === 'none') ? '' : 'none';
+}
+
+function v1SaveTriage(sessionId) {
+  const status = document.getElementById('triage-status-' + sessionId)?.value || 'unreviewed';
+  const notes  = document.getElementById('triage-notes-' + sessionId)?.value  || '';
+  fetch('/api/triage/' + sessionId, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, notes })
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      const fb = document.getElementById('triage-saved-' + sessionId);
+      if (fb) fb.textContent = 'Saved at ' + new Date().toLocaleTimeString();
+      if (typeof toast === 'function') toast('Triage saved', 'success', 1800);
+    }
+  })
+  .catch(() => {
+    if (typeof toast === 'function') toast('Save failed', 'error');
+  });
+}
+
+function v1SetBlockView(idx, view) {
+  const decoded = document.getElementById('blk-decoded-' + idx);
+  const raw     = document.getElementById('blk-raw-'     + idx);
+  const diff    = document.getElementById('blk-diff-'    + idx);
+  if (decoded) decoded.style.display = (view === 'decoded') ? '' : 'none';
+  if (raw)     raw.style.display     = (view === 'raw')     ? '' : 'none';
+  if (diff)    diff.style.display    = (view === 'diff')    ? 'grid' : 'none';
+  document.querySelectorAll('.v1-diff-btn[data-idx="' + idx + '"]').forEach(b => {
+    const isActive = b.dataset.view === view;
+    b.style.background    = isActive ? 'var(--accent-bg)'   : 'transparent';
+    b.style.color         = isActive ? 'var(--accent-text)' : 'var(--text3)';
+    b.style.borderColor   = isActive ? 'var(--accent)'      : 'var(--border)';
+  });
+}
+
+function v1PivotTechnique(tech) {
+  const searchEl = document.getElementById('f-search');
+  if (searchEl) {
+    searchEl.value = tech;
+    if (typeof filterSessions === 'function') filterSessions();
+    searchEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function v1PivotIOC() {
+  /* Could open a deep-search modal — for now just focuses the search bar */
+  const searchEl = document.getElementById('f-search');
+  if (searchEl) { searchEl.focus(); searchEl.select(); }
+}
+</script>
